@@ -13,10 +13,11 @@ pub use crate::checkpoints::checkpoint_output::{
     LogCheckpointOutput, SendCheckpointToStateSync, SubmitCheckpointToConsensus,
 };
 pub use crate::checkpoints::metrics::CheckpointMetrics;
-use crate::stake_aggregator::{InsertResult, StakeAggregator};
+use crate::stake_aggregator::{InsertResult, MultiStakeAggregator};
 use crate::state_accumulator::StateAccumulator;
 use futures::future::{select, Either};
 use futures::FutureExt;
+use itertools::Itertools;
 use mysten_metrics::{monitored_scope, spawn_monitored_task, MonitoredFutureExt};
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
@@ -29,7 +30,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use sui_protocol_config::ProtocolVersion;
 use sui_types::base_types::{EpochId, TransactionDigest};
-use sui_types::crypto::{AuthoritySignInfo, AuthorityStrongQuorumSignInfo};
+use sui_types::crypto::AuthorityStrongQuorumSignInfo;
 use sui_types::digests::{CheckpointContentsDigest, CheckpointDigest};
 use sui_types::effects::{TransactionEffects, TransactionEffectsAPI};
 use sui_types::error::{SuiError, SuiResult};
@@ -658,7 +659,8 @@ pub struct CheckpointSignatureAggregator {
     next_index: u64,
     summary: CheckpointSummary,
     digest: CheckpointDigest,
-    signatures: StakeAggregator<AuthoritySignInfo, true>,
+    /// Aggregates voting stake for each signed checkpoint proposal by authority
+    signatures_by_digest: MultiStakeAggregator<CheckpointDigest, CheckpointSummary, true>,
     metrics: Arc<CheckpointMetrics>,
 }
 
@@ -1278,7 +1280,9 @@ impl CheckpointAggregator {
                     next_index: 0,
                     digest: summary.digest(),
                     summary,
-                    signatures: StakeAggregator::new(self.epoch_store.committee().clone()),
+                    signatures_by_digest: MultiStakeAggregator::new(
+                        self.epoch_store.committee().clone(),
+                    ),
                     metrics: self.metrics.clone(),
                 });
                 self.current.as_mut().unwrap()
@@ -1357,23 +1361,9 @@ impl CheckpointSignatureAggregator {
         let their_digest = *data.summary.digest();
         let (_, signature) = data.summary.into_data_and_sig();
         let author = signature.authority;
-        // It is not guaranteed that signature.authority == narwhal_cert.author, but we do verify
-        // the signature so we know that the author signed the message at some point.
-        if their_digest != self.digest {
-            self.metrics.remote_checkpoint_forks.inc();
-            warn!(
-                checkpoint_seq = self.summary.sequence_number,
-                "Validator {:?} has mismatching checkpoint digest {}, we have digest {}",
-                author.concise(),
-                their_digest,
-                self.digest
-            );
-            return Err(());
-        }
-
         let envelope =
             SignedCheckpointSummary::new_from_data_and_sig(self.summary.clone(), signature);
-        match self.signatures.insert(envelope) {
+        match self.signatures_by_digest.insert(their_digest, envelope) {
             InsertResult::Failed { error } => {
                 warn!(
                     checkpoint_seq = self.summary.sequence_number,
@@ -1381,13 +1371,58 @@ impl CheckpointSignatureAggregator {
                     author.concise(),
                     error
                 );
+                self.check_for_split_brain();
                 Err(())
             }
-            InsertResult::QuorumReached(cert) => Ok(cert),
+            InsertResult::QuorumReached(cert) => {
+                // It is not guaranteed that signature.authority == narwhal_cert.author, but we do verify
+                // the signature so we know that the author signed the message at some point.
+                if their_digest != self.digest {
+                    self.metrics.remote_checkpoint_forks.inc();
+                    warn!(
+                        checkpoint_seq = self.summary.sequence_number,
+                        "Validator {:?} has mismatching checkpoint digest {}, we have digest {}",
+                        author.concise(),
+                        their_digest,
+                        self.digest
+                    );
+                    return Err(());
+                }
+                Ok(cert)
+            }
             InsertResult::NotEnoughVotes {
                 bad_votes: _,
                 bad_authorities: _,
-            } => Err(()),
+            } => {
+                self.check_for_split_brain();
+                Err(())
+            }
+        }
+    }
+
+    fn check_for_split_brain(&self) {
+        if self.signatures_by_digest.quorum_unreachable() {
+            let digests_by_stake_messages = self
+                .signatures_by_digest
+                .get_all_unique_values()
+                .into_iter()
+                .sorted_by_key(|(_, (_, stake))| -(*stake as i64))
+                .map(|(digest, (_authorities, total_stake))| {
+                    format!("{:?} (total stake: {})", digest, total_stake)
+                })
+                .collect::<Vec<String>>();
+            error!(
+                checkpoint_seq = self.summary.sequence_number,
+                "Split brain detected in checkpoint signature aggregation! Remaining stake: {:?}, Digests by stake: {:?}",
+                self.signatures_by_digest.uncommitted_stake(),
+                digests_by_stake_messages,
+            );
+            self.metrics.split_brain_checkpoint_forks.inc();
+            // TODO: at this point we should immediately halt processing
+            // of new transaction certificates to avoid building on top of
+            // forked output
+            #[cfg(simtest)]
+            panic!("Split brain detected in checkpoint signature aggregation!");
         }
     }
 }
@@ -1566,19 +1601,21 @@ impl PendingCheckpoint {
 mod tests {
     use super::*;
     use crate::authority::test_authority_builder::TestAuthorityBuilder;
-    use crate::state_accumulator::StateAccumulator;
     use async_trait::async_trait;
     use shared_crypto::intent::{Intent, IntentScope};
     use std::collections::{BTreeMap, HashMap};
     use std::ops::Deref;
     use sui_macros::sim_test;
-    use sui_types::base_types::{ObjectID, SequenceNumber, TransactionEffectsDigest};
-    use sui_types::crypto::Signature;
+    use sui_types::base_types::{
+        ExecutionDigests, ObjectID, SequenceNumber, TransactionEffectsDigest,
+    };
+    use sui_types::crypto::{AuthoritySignInfo, Signature};
     use sui_types::effects::TransactionEffects;
     use sui_types::messages_checkpoint::SignedCheckpointSummary;
     use sui_types::move_package::MovePackage;
     use sui_types::object;
     use sui_types::transaction::{GenesisObject, VerifiedTransaction};
+    use test_cluster::TestClusterBuilder;
     use tokio::sync::mpsc;
 
     #[sim_test]
@@ -1784,6 +1821,259 @@ mod tests {
         let c2sc = certified_result.recv().await.unwrap();
         assert_eq!(c1sc.sequence_number, 0);
         assert_eq!(c2sc.sequence_number, 1);
+    }
+
+    #[sim_test]
+    #[should_panic(expected = "Split brain detected in checkpoint signature aggregation!")]
+    pub async fn checkpoint_split_brain_test() {
+        telemetry_subscribers::init_for_testing();
+
+        let cluster = TestClusterBuilder::new()
+            .with_num_validators(4)
+            .build()
+            .await;
+        let all_states = cluster
+            .all_node_handles()
+            .iter()
+            .map(|node| node.state().clone())
+            .collect::<Vec<_>>();
+        let state = all_states[0].clone();
+
+        let dummy_tx = VerifiedTransaction::new_genesis_transaction(vec![]);
+        let dummy_tx_with_data =
+            VerifiedTransaction::new_genesis_transaction(vec![GenesisObject::RawObject {
+                data: object::Data::Package(
+                    MovePackage::new(
+                        ObjectID::random(),
+                        SequenceNumber::new(),
+                        BTreeMap::from([(format!("{:0>40000}", "1"), Vec::new())]),
+                        100_000,
+                        // no modules so empty type_origin_table as no types are defined in this package
+                        Vec::new(),
+                        // no modules so empty linkage_table as no dependencies of this package exist
+                        BTreeMap::new(),
+                    )
+                    .unwrap(),
+                ),
+                owner: object::Owner::Immutable,
+            }]);
+        for i in 0..15 {
+            state
+                .database
+                .perpetual_tables
+                .transactions
+                .insert(&d(i), dummy_tx.serializable_ref())
+                .unwrap();
+        }
+        for i in 15..20 {
+            state
+                .database
+                .perpetual_tables
+                .transactions
+                .insert(&d(i), dummy_tx_with_data.serializable_ref())
+                .unwrap();
+        }
+
+        let mut store = HashMap::<TransactionDigest, TransactionEffects>::new();
+        commit_cert_for_test(
+            &mut store,
+            state.clone(),
+            d(1),
+            vec![d(2), d(3)],
+            GasCostSummary::new(11, 12, 11, 1),
+        );
+        commit_cert_for_test(
+            &mut store,
+            state.clone(),
+            d(2),
+            vec![d(3), d(4)],
+            GasCostSummary::new(21, 22, 21, 1),
+        );
+        commit_cert_for_test(
+            &mut store,
+            state.clone(),
+            d(3),
+            vec![],
+            GasCostSummary::new(31, 32, 31, 1),
+        );
+        commit_cert_for_test(
+            &mut store,
+            state.clone(),
+            d(4),
+            vec![],
+            GasCostSummary::new(41, 42, 41, 1),
+        );
+        for i in [10, 11, 12, 13] {
+            commit_cert_for_test(
+                &mut store,
+                state.clone(),
+                d(i),
+                vec![],
+                GasCostSummary::new(41, 42, 41, 1),
+            );
+        }
+        for i in [15, 16, 17] {
+            commit_cert_for_test(
+                &mut store,
+                state.clone(),
+                d(i),
+                vec![],
+                GasCostSummary::new(51, 52, 51, 1),
+            );
+        }
+        let all_digests: Vec<_> = store.keys().copied().collect();
+        for digest in all_digests {
+            let signature = Signature::Ed25519SuiSignature(Default::default()).into();
+            state
+                .epoch_store_for_testing()
+                .test_insert_user_signature(digest, vec![signature]);
+        }
+
+        let (output, mut result) = mpsc::channel::<(CheckpointContents, CheckpointSummary)>(10);
+        let (certified_output, mut certified_result) =
+            mpsc::channel::<CertifiedCheckpointSummary>(10);
+        let store = Box::new(store);
+
+        let ckpt_dir = tempfile::tempdir().unwrap();
+        let checkpoint_store = CheckpointStore::new(ckpt_dir.path());
+
+        let accumulator = StateAccumulator::new(state.database.clone());
+
+        let epoch_store = state.epoch_store_for_testing();
+        let (checkpoint_service, _exit) = CheckpointService::spawn(
+            state.clone(),
+            checkpoint_store,
+            epoch_store.clone(),
+            store,
+            Arc::new(accumulator),
+            Box::new(output),
+            Box::new(certified_output),
+            CheckpointMetrics::new_for_tests(),
+            3,
+            100_000,
+        );
+
+        checkpoint_service
+            .write_and_notify_checkpoint_for_testing(&epoch_store, p(0, vec![4]))
+            .unwrap();
+        checkpoint_service
+            .write_and_notify_checkpoint_for_testing(&epoch_store, p(1, vec![1, 3]))
+            .unwrap();
+        checkpoint_service
+            .write_and_notify_checkpoint_for_testing(&epoch_store, p(2, vec![10, 11, 12, 13]))
+            .unwrap();
+        checkpoint_service
+            .write_and_notify_checkpoint_for_testing(&epoch_store, p(3, vec![15, 16, 17]))
+            .unwrap();
+
+        let (c1c, c1s) = result.recv().await.unwrap();
+        let (c2c, c2s) = result.recv().await.unwrap();
+
+        let c1t = c1c.iter().map(|d| d.transaction).collect::<Vec<_>>();
+        let c2t = c2c.iter().map(|d| d.transaction).collect::<Vec<_>>();
+        assert_eq!(c1t, vec![d(4)]);
+        assert_eq!(c1s.previous_digest, None);
+        assert_eq!(c1s.sequence_number, 0);
+        assert_eq!(
+            c1s.epoch_rolling_gas_cost_summary,
+            GasCostSummary::new(41, 42, 41, 1)
+        );
+
+        assert_eq!(c2t, vec![d(3), d(2), d(1)]);
+        assert_eq!(c2s.previous_digest, Some(c1s.digest()));
+        assert_eq!(c2s.sequence_number, 1);
+        assert_eq!(
+            c2s.epoch_rolling_gas_cost_summary,
+            GasCostSummary::new(104, 108, 104, 4)
+        );
+
+        // Pending at index 2 had 4 transactions, and we configured 3 transactions max.
+        // Verify that we split into 2 checkpoints.
+        let (c3c, c3s) = result.recv().await.unwrap();
+        let c3t = c3c.iter().map(|d| d.transaction).collect::<Vec<_>>();
+        let (c4c, c4s) = result.recv().await.unwrap();
+        let c4t = c4c.iter().map(|d| d.transaction).collect::<Vec<_>>();
+        assert_eq!(c3s.sequence_number, 2);
+        assert_eq!(c3s.previous_digest, Some(c2s.digest()));
+        assert_eq!(c4s.sequence_number, 3);
+        assert_eq!(c4s.previous_digest, Some(c3s.digest()));
+        assert_eq!(c3t, vec![d(10), d(11), d(12)]);
+        assert_eq!(c4t, vec![d(13)]);
+
+        // Pending at index 3 had 3 transactions of 40K size, and we configured 100K max.
+        // Verify that we split into 2 checkpoints.
+        let (c5c, c5s) = result.recv().await.unwrap();
+        let c5t = c5c.iter().map(|d| d.transaction).collect::<Vec<_>>();
+        let (c6c, c6s) = result.recv().await.unwrap();
+        let c6t = c6c.iter().map(|d| d.transaction).collect::<Vec<_>>();
+        assert_eq!(c5s.sequence_number, 4);
+        assert_eq!(c5s.previous_digest, Some(c4s.digest()));
+        assert_eq!(c6s.sequence_number, 5);
+        assert_eq!(c6s.previous_digest, Some(c5s.digest()));
+        assert_eq!(c5t, vec![d(15), d(16)]);
+        assert_eq!(c6t, vec![d(17)]);
+
+        //////////////////////////////////////////////////////////////////////////////////
+
+        let alt_execution_digest = ExecutionDigests::new(d(1), TransactionEffectsDigest::random());
+        let c1c_alternative =
+            CheckpointContents::new_with_digests_only_for_tests(vec![alt_execution_digest]);
+        let c1s_alternative = CheckpointSummary::new(
+            c1s.epoch,
+            c1s.sequence_number,
+            c1s.network_total_transactions,
+            &c1c_alternative,
+            c1s.previous_digest,
+            c1s.epoch_rolling_gas_cost_summary,
+            c1s.end_of_epoch_data,
+            c1s.timestamp_ms,
+        );
+
+        // Generate two equal sets of signatures for the same checkpoint
+        let c1ss_val1 =
+            SignedCheckpointSummary::new(c1s.epoch, c1s, all_states[0].secret.deref(), state.name);
+        let c1ss_val2 =
+            SignedCheckpointSummary::new(c1s.epoch, c1s, all_states[1].secret.deref(), state.name);
+        let c1ss_val3 = SignedCheckpointSummary::new(
+            c1s_alternative.epoch,
+            c1s_alternative,
+            all_states[2].secret.deref(),
+            state.name,
+        );
+        let c1ss_val4 = SignedCheckpointSummary::new(
+            c1s_alternative.epoch,
+            c1s_alternative,
+            all_states[3].secret.deref(),
+            state.name,
+        );
+
+        checkpoint_service
+            .notify_checkpoint_signature(
+                &epoch_store,
+                &CheckpointSignatureMessage { summary: c1ss_val1 },
+            )
+            .unwrap();
+        checkpoint_service
+            .notify_checkpoint_signature(
+                &epoch_store,
+                &CheckpointSignatureMessage { summary: c1ss_val2 },
+            )
+            .unwrap();
+        checkpoint_service
+            .notify_checkpoint_signature(
+                &epoch_store,
+                &CheckpointSignatureMessage { summary: c1ss_val3 },
+            )
+            .unwrap();
+        checkpoint_service
+            .notify_checkpoint_signature(
+                &epoch_store,
+                &CheckpointSignatureMessage { summary: c1ss_val4 },
+            )
+            .unwrap();
+
+        let c1sc = certified_result.recv().await.unwrap();
+        unreachable!("Should have panicked without having received a certified checkpoint");
     }
 
     #[async_trait]
