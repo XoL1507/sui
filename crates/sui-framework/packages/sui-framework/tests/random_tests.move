@@ -30,7 +30,7 @@ module sui::random_tests {
             test_scenario::ctx(scenario)
         );
 
-        // TODO: add more tests, those are the basic ones.
+        // TODO: Add more tests, those are the basic ones.
 
         // Generator creation
         let gen = new_generator(&random_state, test_scenario::ctx(scenario));

@@ -79,7 +79,6 @@ module sui::random {
         inner
     }
 
-    #[allow(unused_function)] // TODO: remove annotation after implementing user-facing API
     fun load_inner(
         self: &Random,
     ): &RandomInner {
@@ -142,18 +141,18 @@ module sui::random {
     /// Create a generator.
     public fun new_generator(r: &Random, ctx: &mut TxContext): RandomGenerator {
         let inner = load_inner(r);
-        // TODO: PRF - should we use keyed blake2b256? or something else?
+        // TODO[crypto]: PRF - should we use keyed blake2b256? or something else?
         let seed_inputs = inner.random_bytes;
         vector::append(&mut seed_inputs, to_bytes(fresh_object_address(ctx)));
         let seed = blake2b256(&seed_inputs);
         RandomGenerator { seed, counter: 0, buffer: vector::empty() }
     }
 
-    // TODO: Should any of the following functions be implemented as native functions to save gas?
+    // TODO[move]: Should any of the following functions be implemented as native functions to save gas?
 
     // Fill the buffer with 32 random bytes.
     fun fill_buffer(g: &mut RandomGenerator) {
-        // TODO: PRF - should we used keyed blake2b256? or something else?
+        // TODO[crypto]: PRF - should we used keyed blake2b256? or something else?
         let inputs = g.seed;
         vector::append(&mut inputs, bcs::to_bytes(&g.counter));
         g.counter = g.counter + 1;
@@ -162,7 +161,7 @@ module sui::random {
 
     /// Derive n random bytes.
     public fun bytes(g: &mut RandomGenerator, num_of_bytes: u16): vector<u8> {
-        // TODO: should we have this limit or just leave it to gas limit?
+        // TODO[move]: should we have this limit or just leave it to gas limit?
         assert!(num_of_bytes <= MAX_RANDOM_BYTES, ETooManyBytes);
         let result = vector::empty();
         let num_of_derived_bytes = 0;
@@ -176,7 +175,7 @@ module sui::random {
         result
     }
 
-    // Helper function that extract the given number of bytes from the random generator and returns it as u256.
+    // Helper function that extracts the given number of bytes from the random generator and returns it as u256.
     // Assumes that the caller has already checked that num_of_bytes is valid.
     fun u256_from_bytes(g: &mut RandomGenerator, num_of_bytes: u16): u256 {
         let bytes = bytes(g, num_of_bytes);
