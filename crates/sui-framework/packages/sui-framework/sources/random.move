@@ -1,10 +1,7 @@
 // Copyright (c) Mysten Labs, Inc.
 // SPDX-License-Identifier: Apache-2.0
 
-#[allow(unused_use)]
-// This module provides functionality for generating and using secure randomness.
-//
-// Randomness is currently write-only, until user-facing API is implemented.
+/// This module provides functionality for generating secure randomness.
 module sui::random {
     use std::bcs;
     use std::vector;
@@ -33,7 +30,6 @@ module sui::random {
 
     struct RandomInner has store {
         version: u64,
-
         epoch: u64,
         randomness_round: u64,
         random_bytes: vector<u8>,
