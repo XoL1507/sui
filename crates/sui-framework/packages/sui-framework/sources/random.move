@@ -192,27 +192,27 @@ module sui::random {
 
     /// Derive a u128.
     public fun derive_u128(g: &mut RandomGenerator): u128 {
-        ((u256_from_bytes(g, 16) % 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF) as u128)
+        (u256_from_bytes(g, 16) as u128)
     }
 
     /// Derive a u64.
     public fun derive_u64(g: &mut RandomGenerator): u64 {
-        ((u256_from_bytes(g, 8) % 0xFFFFFFFFFFFFFFFF) as u64)
+        (u256_from_bytes(g, 8) as u64)
     }
 
     /// Derive a u32.
     public fun derive_u32(g: &mut RandomGenerator): u32 {
-        ((u256_from_bytes(g, 4) % 0xFFFFFFFF) as u32)
+        (u256_from_bytes(g, 4) as u32)
     }
 
     /// Derive a u16.
     public fun derive_u16(g: &mut RandomGenerator): u16 {
-        ((u256_from_bytes(g, 2) % 0xFFFF) as u16)
+        (u256_from_bytes(g, 2) as u16)
     }
 
     /// Derive a u8.
     public fun derive_u8(g: &mut RandomGenerator): u8 {
-        ((u256_from_bytes(g, 1) % 0xFF) as u8)
+        (u256_from_bytes(g, 1) as u8)
     }
 
     /// Derive a random u128 in [min, max] (with a bias of 2^{-128}).
