@@ -6,7 +6,7 @@ module sui::random {
     use std::bcs;
     use std::vector;
     use sui::address::to_bytes;
-    use sui::hash::blake2b256;
+    use sui::hmac::hmac_sha3_256;
     use sui::object::{Self, UID};
     use sui::transfer;
     use sui::tx_context::{Self, TxContext, fresh_object_address};
@@ -137,10 +137,8 @@ module sui::random {
     /// Create a generator.
     public fun new_generator(r: &Random, ctx: &mut TxContext): RandomGenerator {
         let inner = load_inner(r);
-        // TODO[crypto]: PRF - should we use keyed blake2b256? or something else?
-        let seed_inputs = inner.random_bytes;
-        vector::append(&mut seed_inputs, to_bytes(fresh_object_address(ctx)));
-        let seed = blake2b256(&seed_inputs);
+        // TODO[crypto]: should blake be used here instead?
+        let seed = hmac_sha3_256(&inner.random_bytes,&to_bytes(fresh_object_address(ctx)));
         RandomGenerator { seed, counter: 0, buffer: vector::empty() }
     }
 
@@ -148,11 +146,9 @@ module sui::random {
 
     // Fill the buffer with 32 random bytes.
     fun fill_buffer(g: &mut RandomGenerator) {
-        // TODO[crypto]: PRF - should we used keyed blake2b256? or something else?
-        let inputs = g.seed;
-        vector::append(&mut inputs, bcs::to_bytes(&g.counter));
+        // TODO[crypto]: should blake be used here instead?
+        vector::append(&mut g.buffer, hmac_sha3_256(&g.seed, &bcs::to_bytes(&g.counter)));
         g.counter = g.counter + 1;
-        vector::append(&mut g.buffer, blake2b256(&inputs));
     }
 
     /// Derive n random bytes.
@@ -220,7 +216,7 @@ module sui::random {
         assert!(min < max, EInvalidRange);
         let diff = ((max - min + 1) as u256);
         let rand = derive_u256(g);
-        ((rand % diff) as u128) + min
+        min + ((rand % diff) as u128)
     }
 
     #[test_only]
