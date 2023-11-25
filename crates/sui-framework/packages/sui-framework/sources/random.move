@@ -171,11 +171,10 @@ module sui::random {
         };
 
         // Copy remaining bytes.
-        let num_of_bytes = (num_of_bytes as u64); // To reduce casting below.
-        if (vector::length(&g.buffer) < (num_of_bytes - vector::length(&result))) {
+        if (vector::length(&g.buffer) < ((num_of_bytes as u64) - vector::length(&result))) {
             fill_buffer(g);
         };
-        while (vector::length(&result) < num_of_bytes) {
+        while (vector::length(&result) < (num_of_bytes as u64)) {
             vector::push_back(&mut result, vector::pop_back(&mut g.buffer));
         };
         result
