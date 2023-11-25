@@ -144,78 +144,90 @@ module sui::random {
 
     // TODO[move]: Should any of the following functions be implemented as native functions to save gas?
 
-    // Fill the buffer with 32 random bytes.
+    // Fill the generator's buffer with 32 random bytes.
     fun fill_buffer(g: &mut RandomGenerator) {
         // TODO[crypto]: should blake be used here instead?
         vector::append(&mut g.buffer, hmac_sha3_256(&g.seed, &bcs::to_bytes(&g.counter)));
         g.counter = g.counter + 1;
     }
 
-    /// Derive n random bytes.
+    // Fill an external buffer with 32 random bytes.
+    fun fill_external_buffer(g: &mut RandomGenerator, buffer: &mut vector<u8>) {
+        // TODO[crypto]: should blake be used here instead?
+        vector::append(buffer, hmac_sha3_256(&g.seed, &bcs::to_bytes(&g.counter)));
+        g.counter = g.counter + 1;
+    }
+
+    /// Generate n random bytes.
     public fun bytes(g: &mut RandomGenerator, num_of_bytes: u16): vector<u8> {
         // TODO[move]: should we have this limit or just leave it to gas limit?
         assert!(num_of_bytes <= MAX_RANDOM_BYTES, ETooManyBytes);
         let result = vector::empty();
-        let num_of_derived_bytes = 0;
-        while (num_of_derived_bytes < num_of_bytes) {
+        // Append RAND_OUTPUT_LEN size buffers directly.
+        let num_of_blocks = num_of_bytes / RAND_OUTPUT_LEN;
+        while (num_of_blocks > 0) {
+            fill_external_buffer(g, &mut result);
+            num_of_blocks = num_of_blocks - 1;
+        };
+        // Copy remaining bytes.
+        while (vector::length(&result) < (num_of_bytes as u64)) {
             if (vector::length(&g.buffer) == 0) {
                 fill_buffer(g);
             };
             vector::push_back(&mut result, vector::pop_back(&mut g.buffer));
-            num_of_derived_bytes = num_of_derived_bytes + 1;
         };
         result
     }
 
     // Helper function that extracts the given number of bytes from the random generator and returns it as u256.
     // Assumes that the caller has already checked that num_of_bytes is valid.
-    fun u256_from_bytes(g: &mut RandomGenerator, num_of_bytes: u16): u256 {
-        let bytes = bytes(g, num_of_bytes);
+    fun u256_from_bytes(g: &mut RandomGenerator, num_of_bytes: u64): u256 {
+        let bytes = bytes(g, (num_of_bytes as u16));
         let result: u256 = 0;
         let i = 0;
         while (i < num_of_bytes) {
-            let byte = *vector::borrow(&bytes, (i as u64));
+            let byte = *vector::borrow(&bytes, i);
             result = (result << 8) + (byte as u256);
             i = i + 1;
         };
         result
     }
 
-    /// Derive a u256.
-    public fun derive_u256(g: &mut RandomGenerator): u256 {
+    /// Generate a u256.
+    public fun generate_u256(g: &mut RandomGenerator): u256 {
         u256_from_bytes(g, 32)
     }
 
-    /// Derive a u128.
-    public fun derive_u128(g: &mut RandomGenerator): u128 {
+    /// Generate a u128.
+    public fun generate_u128(g: &mut RandomGenerator): u128 {
         (u256_from_bytes(g, 16) as u128)
     }
 
-    /// Derive a u64.
-    public fun derive_u64(g: &mut RandomGenerator): u64 {
+    /// Generate a u64.
+    public fun generate_u64(g: &mut RandomGenerator): u64 {
         (u256_from_bytes(g, 8) as u64)
     }
 
-    /// Derive a u32.
-    public fun derive_u32(g: &mut RandomGenerator): u32 {
+    /// Generate a u32.
+    public fun generate_u32(g: &mut RandomGenerator): u32 {
         (u256_from_bytes(g, 4) as u32)
     }
 
-    /// Derive a u16.
-    public fun derive_u16(g: &mut RandomGenerator): u16 {
+    /// Generate a u16.
+    public fun generate_u16(g: &mut RandomGenerator): u16 {
         (u256_from_bytes(g, 2) as u16)
     }
 
-    /// Derive a u8.
-    public fun derive_u8(g: &mut RandomGenerator): u8 {
+    /// Generate a u8.
+    public fun generate_u8(g: &mut RandomGenerator): u8 {
         (u256_from_bytes(g, 1) as u8)
     }
 
-    /// Derive a random u128 in [min, max] (with a bias of 2^{-128}).
-    public fun in_range_u128(g: &mut RandomGenerator, min: u128, max: u128): u128 {
+    /// Generate a random u128 in [min, max] (with a bias of 2^{-128}).
+    public fun generate_u128_in_range(g: &mut RandomGenerator, min: u128, max: u128): u128 {
         assert!(min < max, EInvalidRange);
         let diff = ((max - min + 1) as u256);
-        let rand = derive_u256(g);
+        let rand = generate_u256(g);
         min + ((rand % diff) as u128)
     }
 
