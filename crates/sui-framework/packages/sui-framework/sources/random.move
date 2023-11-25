@@ -127,7 +127,7 @@ module sui::random {
     /// Unique randomness generator, derived from the global randomness.
     struct RandomGenerator has drop {
         seed: vector<u8>,
-        counter: u64,
+        counter: u16,
         buffer: vector<u8>,
     }
 
@@ -144,18 +144,17 @@ module sui::random {
 
     // TODO[move]: Should any of the following functions be implemented as native functions to save gas?
 
-    // Fill the generator's buffer with 32 random bytes.
-    fun fill_buffer(g: &mut RandomGenerator) {
-        // TODO[crypto]: should blake be used here instead?
-        vector::append(&mut g.buffer, hmac_sha3_256(&g.seed, &bcs::to_bytes(&g.counter)));
+    // Get the next block of random bytes.
+    fun derive_next_block(g: &mut RandomGenerator): vector<u8> {
         g.counter = g.counter + 1;
+        // TODO[crypto]: should blake be used here instead?
+        hmac_sha3_256(&g.seed, &bcs::to_bytes(&g.counter))
     }
 
-    // Fill an external buffer with 32 random bytes.
-    fun fill_external_buffer(g: &mut RandomGenerator, buffer: &mut vector<u8>) {
-        // TODO[crypto]: should blake be used here instead?
-        vector::append(buffer, hmac_sha3_256(&g.seed, &bcs::to_bytes(&g.counter)));
-        g.counter = g.counter + 1;
+    // Fill the generator's buffer with 32 random bytes.
+    fun fill_buffer(g: &mut RandomGenerator) {
+        let next_block = derive_next_block(g);
+        vector::append(&mut g.buffer, next_block);
     }
 
     /// Generate n random bytes.
@@ -163,17 +162,20 @@ module sui::random {
         // TODO[move]: should we have this limit or just leave it to gas limit?
         assert!(num_of_bytes <= MAX_RANDOM_BYTES, ETooManyBytes);
         let result = vector::empty();
+
         // Append RAND_OUTPUT_LEN size buffers directly.
         let num_of_blocks = num_of_bytes / RAND_OUTPUT_LEN;
         while (num_of_blocks > 0) {
-            fill_external_buffer(g, &mut result);
+            vector::append(&mut result, derive_next_block(g));
             num_of_blocks = num_of_blocks - 1;
         };
+
         // Copy remaining bytes.
-        while (vector::length(&result) < (num_of_bytes as u64)) {
-            if (vector::length(&g.buffer) == 0) {
-                fill_buffer(g);
-            };
+        let num_of_bytes = (num_of_bytes as u64); // To reduce casting below.
+        if (vector::length(&g.buffer) < (num_of_bytes - vector::length(&result))) {
+            fill_buffer(g);
+        };
+        while (vector::length(&result) < num_of_bytes) {
             vector::push_back(&mut result, vector::pop_back(&mut g.buffer));
         };
         result
@@ -181,12 +183,14 @@ module sui::random {
 
     // Helper function that extracts the given number of bytes from the random generator and returns it as u256.
     // Assumes that the caller has already checked that num_of_bytes is valid.
-    fun u256_from_bytes(g: &mut RandomGenerator, num_of_bytes: u64): u256 {
-        let bytes = bytes(g, (num_of_bytes as u16));
+    fun u256_from_bytes(g: &mut RandomGenerator, num_of_bytes: u8): u256 {
+        if (vector::length(&g.buffer) < (num_of_bytes as u64)) {
+            fill_buffer(g);
+        };
         let result: u256 = 0;
         let i = 0;
         while (i < num_of_bytes) {
-            let byte = *vector::borrow(&bytes, i);
+            let byte = vector::pop_back(&mut g.buffer);
             result = (result << 8) + (byte as u256);
             i = i + 1;
         };
@@ -237,7 +241,7 @@ module sui::random {
     }
 
     #[test_only]
-    public fun generator_counter(r: &RandomGenerator): u64 {
+    public fun generator_counter(r: &RandomGenerator): u16 {
         r.counter
     }
 

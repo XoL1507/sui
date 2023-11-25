@@ -15,7 +15,7 @@ module sui::random_tests {
         generate_u256, generate_u128, generate_u64, generate_u32, generate_u16, generate_u8, generate_u128_in_range,
     };
 
-    // TODO: Add more tests
+    // TODO: Add more tests (including edge cases of bytes())
 
     // TODO: add one from https://nvlpubs.nist.gov/nistpubs/Legacy/SP/nistspecialpublication800-22r1a.pdf
 
