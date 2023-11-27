@@ -97,6 +97,9 @@ const MAX_PROTOCOL_VERSION: u64 = 32;
 //             Enable transfer to object in testnet.
 //             Enable Narwhal CertificateV2 on mainnet
 //             Make critbit tree and order getters public in deepbook.
+//             Enable accepting Multisig containing zkLogin sig.
+//             Add config for upper bound on zklogin signature's max epoch.
+//             Accepts Google's other iss ("accounts.google.com" in addition to "https://accounts.google.com") in zkLogin signature.
 
 #[derive(Copy, Clone, Debug, Hash, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
 pub struct ProtocolVersion(u64);
@@ -347,6 +350,12 @@ struct FeatureFlags {
     // If true, multisig containing zkLogin sig is accepted.
     #[serde(skip_serializing_if = "is_false")]
     accept_zklogin_in_multisig: bool,
+    // determine whether the upper bound (current epoch + zklogin_max_epoch_upper_bound) for the max_epoch.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    zklogin_max_epoch_upper_bound: Option<u64>,
+    // If true, the alternative iss ("accounts.google.com" in addition to "https://accounts.google.com") for Google is accepted.
+    #[serde(skip_serializing_if = "is_false")]
+    accept_zklogin_google_alternative_iss: bool,
 }
 
 fn is_false(b: &bool) -> bool {
@@ -1045,6 +1054,14 @@ impl ProtocolConfig {
         self.feature_flags.accept_zklogin_in_multisig
     }
 
+    pub fn accept_zklogin_google_alternative_iss(&self) -> bool {
+        self.feature_flags.accept_zklogin_google_alternative_iss
+    }
+
+    pub fn zklogin_max_epoch_upper_bound(&self) -> Option<u64> {
+        self.feature_flags.zklogin_max_epoch_upper_bound
+    }
+
     pub fn throughput_aware_consensus_submission(&self) -> bool {
         self.feature_flags.throughput_aware_consensus_submission
     }
@@ -1670,6 +1687,12 @@ impl ProtocolConfig {
 
                     // enable nw cert v2 on mainnet
                     cfg.feature_flags.narwhal_certificate_v2 = true;
+
+                    // set the upper bound to check zklogin signature's max_epoch field
+                    cfg.feature_flags.zklogin_max_epoch_upper_bound = Some(2);
+
+                    // enable the alternative iss ("accounts.google.com" in addition to "https://accounts.google.com") for Google is accepted
+                    cfg.feature_flags.accept_zklogin_google_alternative_iss = true;
                 }
                 // Use this template when making changes:
                 //

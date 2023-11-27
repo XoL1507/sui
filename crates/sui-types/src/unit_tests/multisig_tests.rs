@@ -929,7 +929,8 @@ fn multisig_zklogin_scenarios() {
         .into_iter()
         .collect();
 
-    let mut aux_verify_data = VerifyParams::new(parsed, vec![], ZkLoginEnv::Test, true, true);
+    let mut aux_verify_data =
+        VerifyParams::new(parsed, vec![], ZkLoginEnv::Test, true, true, Some(2), true);
 
     // 1 zklogin sig verifies.
     let multisig = MultiSig::combine(vec![zklogin_sig.clone()], multisig_pk.clone()).unwrap();
