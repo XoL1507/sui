@@ -20,11 +20,15 @@ module sui::random {
     const EInvalidRange: u64 = 4;
 
     const CURRENT_VERSION: u64 = 1;
+    const RAND_OUTPUT_LEN: u16 = 32;
+    const MAX_RANDOM_BYTES: u16 = RAND_OUTPUT_LEN * 100;
 
     /// Singleton shared object which stores the global randomness state.
     /// The actual state is stored in a versioned inner field.
     struct Random has key {
         id: UID,
+        // The inner object must never be accessed outside this module as it could be used for accessing global
+        // randomness via desreiablization of RandomInner.
         inner: Versioned,
     }
 
@@ -131,18 +135,13 @@ module sui::random {
         buffer: vector<u8>,
     }
 
-    const RAND_OUTPUT_LEN: u16 = 32;
-    const MAX_RANDOM_BYTES: u16 = RAND_OUTPUT_LEN * 100;
-
-    /// Create a generator.
+    /// Create a generator. Can be used to derive up to MAX_U16 * 32 random bytes.
     public fun new_generator(r: &Random, ctx: &mut TxContext): RandomGenerator {
         let inner = load_inner(r);
         // TODO[crypto]: should blake be used here instead?
         let seed = hmac_sha3_256(&inner.random_bytes,&to_bytes(fresh_object_address(ctx)));
         RandomGenerator { seed, counter: 0, buffer: vector::empty() }
     }
-
-    // TODO[move]: Should any of the following functions be implemented as native functions to save gas?
 
     // Get the next block of random bytes.
     fun derive_next_block(g: &mut RandomGenerator): vector<u8> {
@@ -162,15 +161,13 @@ module sui::random {
         // TODO[move]: should we have this limit or just leave it to gas limit?
         assert!(num_of_bytes <= MAX_RANDOM_BYTES, ETooManyBytes);
         let result = vector::empty();
-
-        // Append RAND_OUTPUT_LEN size buffers directly.
+        // Append RAND_OUTPUT_LEN size buffers directly without going through the generator's buffer.
         let num_of_blocks = num_of_bytes / RAND_OUTPUT_LEN;
         while (num_of_blocks > 0) {
             vector::append(&mut result, derive_next_block(g));
             num_of_blocks = num_of_blocks - 1;
         };
-
-        // Copy remaining bytes.
+        // Take remaining bytes from the generator's buffer.
         if (vector::length(&g.buffer) < ((num_of_bytes as u64) - vector::length(&result))) {
             fill_buffer(g);
         };
