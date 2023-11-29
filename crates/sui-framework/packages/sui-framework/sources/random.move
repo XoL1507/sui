@@ -221,7 +221,7 @@ module sui::random {
     // Assumes that the caller verified the inputs, and uses num_of_bytes to control the bias.
     fun u128_in_range(g: &mut RandomGenerator, min: u128, max: u128, num_of_bytes: u8): u128 {
         assert!(min < max, EInvalidRange);
-        let diff = ((max - min + 1) as u256);
+        let diff = ((max - min) as u256) + 1;
         let rand = u256_from_bytes(g, num_of_bytes);
         min + ((rand % diff) as u128)
     }

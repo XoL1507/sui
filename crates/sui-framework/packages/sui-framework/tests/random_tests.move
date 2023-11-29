@@ -398,6 +398,8 @@ module sui::random_tests {
         assert!(output1 != output2, 0);
         let output = generate_u128_in_range(&mut gen, 123454321, 123454321 + 1);
         assert!((output == 123454321) || (output == 123454321 + 1), 0);
+        // test the edge case of u128_in_range (covers also the other in_range functions)
+        let _output = generate_u128_in_range(&mut gen, 0, 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF);
         let i = 0;
         while (i < 50) {
             let min = generate_u128(&mut gen);
