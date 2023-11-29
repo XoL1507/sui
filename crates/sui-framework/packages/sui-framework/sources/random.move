@@ -16,12 +16,10 @@ module sui::random {
     const ENotSystemAddress: u64 = 0;
     const EWrongInnerVersion: u64 = 1;
     const EInvalidRandomnessUpdate: u64 = 2;
-    const ETooManyBytes: u64 = 3;
-    const EInvalidRange: u64 = 4;
+    const EInvalidRange: u64 = 3;
 
     const CURRENT_VERSION: u64 = 1;
     const RAND_OUTPUT_LEN: u16 = 32;
-    const MAX_RANDOM_BYTES: u16 = RAND_OUTPUT_LEN * 100;
 
     /// Singleton shared object which stores the global randomness state.
     /// The actual state is stored in a versioned inner field.
@@ -158,8 +156,6 @@ module sui::random {
 
     /// Generate n random bytes.
     public fun bytes(g: &mut RandomGenerator, num_of_bytes: u16): vector<u8> {
-        // TODO[move]: should we have this limit or just leave it to gas limit?
-        assert!(num_of_bytes <= MAX_RANDOM_BYTES, ETooManyBytes);
         let result = vector::empty();
         // Append RAND_OUTPUT_LEN size buffers directly without going through the generator's buffer.
         let num_of_blocks = num_of_bytes / RAND_OUTPUT_LEN;
@@ -223,12 +219,38 @@ module sui::random {
         (u256_from_bytes(g, 1) as u8)
     }
 
-    /// Generate a random u128 in [min, max] (with a bias of 2^{-128}).
-    public fun generate_u128_in_range(g: &mut RandomGenerator, min: u128, max: u128): u128 {
+    // Helper function to generate a random u128 in [min, max] using a random number with num_of_bytes bytes.
+    // Assumes that the caller verified the inputs, and uses num_of_bytes to control the bias.
+    fun u128_in_range(g: &mut RandomGenerator, min: u128, max: u128, num_of_bytes: u8): u128 {
         assert!(min < max, EInvalidRange);
         let diff = ((max - min + 1) as u256);
-        let rand = generate_u256(g);
+        let rand = u256_from_bytes(g, num_of_bytes);
         min + ((rand % diff) as u128)
+    }
+
+    /// Generate a random u128 in [min, max] (with a bias of 2^{-64}).
+    public fun generate_u128_in_range(g: &mut RandomGenerator, min: u128, max: u128): u128 {
+        u128_in_range(g, min, max, 24)
+    }
+
+    //// Generate a random u64 in [min, max] (with a bias of 2^{-64}).
+    public fun generate_u64_in_range(g: &mut RandomGenerator, min: u64, max: u64): u64 {
+        (u128_in_range(g, (min as u128), (max as u128), 16) as u64)
+    }
+
+    /// Generate a random u32 in [min, max] (with a bias of 2^{-64}).
+    public fun generate_u32_in_range(g: &mut RandomGenerator, min: u32, max: u32): u32 {
+        (u128_in_range(g, (min as u128), (max as u128), 12) as u32)
+    }
+
+    /// Generate a random u16 in [min, max] (with a bias of 2^{-64}).
+    public fun generate_u16_in_range(g: &mut RandomGenerator, min: u16, max: u16): u16 {
+        (u128_in_range(g, (min as u128), (max as u128), 10) as u16)
+    }
+
+    /// Generate a random u8 in [min, max] (with a bias of 2^{-64}).
+    public fun generate_u8_in_range(g: &mut RandomGenerator, min: u8, max: u8): u8 {
+        (u128_in_range(g, (min as u128), (max as u128), 9) as u8)
     }
 
     #[test_only]
