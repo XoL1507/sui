@@ -26,7 +26,7 @@ module sui::random {
     struct Random has key {
         id: UID,
         // The inner object must never be accessed outside this module as it could be used for accessing global
-        // randomness via desreiablization of RandomInner.
+        // randomness via deserialization of RandomInner.
         inner: Versioned,
     }
 
