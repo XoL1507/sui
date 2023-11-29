@@ -6,6 +6,7 @@
 #[allow(unused_use)]
 module sui::random_tests {
     use std::vector;
+    use sui::bcs;
     use sui::test_scenario;
     use sui::random::{
         Self,
@@ -249,6 +250,14 @@ module sui::random_tests {
         let _output4 = generate_u256(&mut gen);
         assert!(generator_counter(&gen) == 4, 0);
         assert!(vector::length(generator_buffer(&gen)) == 31, 0);
+        // Check that we indeed generate all bytes as random
+        let i = 0;
+        while (i < 32) {
+            let x = generate_u256(&mut gen);
+            let x_bytes = bcs::to_bytes(&x);
+            if (*vector::borrow(&x_bytes, i) != 0u8)
+                i = i + 1;
+        };
 
         // u128
         gen = new_generator(&random_state, test_scenario::ctx(scenario));
@@ -264,6 +273,13 @@ module sui::random_tests {
         let _output4 = generate_u128(&mut gen);
         assert!(generator_counter(&gen) == 2, 0);
         assert!(vector::length(generator_buffer(&gen)) == 15, 0);
+        let i = 0;
+        while (i < 16) {
+            let x = generate_u128(&mut gen);
+            let x_bytes = bcs::to_bytes(&x);
+            if (*vector::borrow(&x_bytes, i) != 0u8)
+                i = i + 1;
+        };
 
         // u64
         gen = new_generator(&random_state, test_scenario::ctx(scenario));
@@ -279,6 +295,13 @@ module sui::random_tests {
         let _output4 = generate_u64(&mut gen);
         assert!(generator_counter(&gen) == 1, 0);
         assert!(vector::length(generator_buffer(&gen)) == 7, 0);
+        let i = 0;
+        while (i < 8) {
+            let x = generate_u64(&mut gen);
+            let x_bytes = bcs::to_bytes(&x);
+            if (*vector::borrow(&x_bytes, i) != 0u8)
+                i = i + 1;
+        };
 
         // u32
         gen = new_generator(&random_state, test_scenario::ctx(scenario));
@@ -294,6 +317,13 @@ module sui::random_tests {
         let _output4 = generate_u32(&mut gen);
         assert!(generator_counter(&gen) == 1, 0);
         assert!(vector::length(generator_buffer(&gen)) == 19, 0);
+        let i = 0;
+        while (i < 4) {
+            let x = generate_u32(&mut gen);
+            let x_bytes = bcs::to_bytes(&x);
+            if (*vector::borrow(&x_bytes, i) != 0u8)
+                i = i + 1;
+        };
 
         // u16
         gen = new_generator(&random_state, test_scenario::ctx(scenario));
@@ -309,6 +339,13 @@ module sui::random_tests {
         let _output4 = generate_u16(&mut gen);
         assert!(generator_counter(&gen) == 1, 0);
         assert!(vector::length(generator_buffer(&gen)) == 25, 0);
+        let i = 0;
+        while (i < 2) {
+            let x = generate_u16(&mut gen);
+            let x_bytes = bcs::to_bytes(&x);
+            if (*vector::borrow(&x_bytes, i) != 0u8)
+                i = i + 1;
+        };
 
         // u8
         gen = new_generator(&random_state, test_scenario::ctx(scenario));
@@ -324,6 +361,11 @@ module sui::random_tests {
         let _output4 = generate_u8(&mut gen);
         assert!(generator_counter(&gen) == 1, 0);
         assert!(vector::length(generator_buffer(&gen)) == 13, 0);
+        while (true) {
+            let x = generate_u8(&mut gen);
+            if (x != 0u8)
+                break
+        };
 
         test_scenario::return_shared(random_state);
         test_scenario::end(scenario_val);
