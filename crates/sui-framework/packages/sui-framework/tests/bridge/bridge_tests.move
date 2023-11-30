@@ -1,1 +1,5 @@
-module sui::bridge_tests {}
+module sui::bridge_tests {
+
+
+
+}

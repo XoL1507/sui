@@ -8,6 +8,8 @@ module sui::bridge_treasury {
 
     use sui::coin::{Self, TreasuryCap, Coin};
     use sui::object_bag::{Self, ObjectBag};
+    use sui::sui::SUI;
+    use sui::token_ids;
     use sui::transfer;
     use sui::tx_context::TxContext;
 
@@ -107,5 +109,22 @@ module sui::bridge_treasury {
             (type_name::get<T>() == type_name::get<ETH>()) ||
             (type_name::get<T>() == type_name::get<USDC>()) ||
             (type_name::get<T>() == type_name::get<USDT>())
+    }
+
+    public fun token_id<T>(): u8 {
+        let coin_type = type_name::get<T>();
+        if (coin_type == type_name::get<SUI>()) {
+            token_ids::sui()
+        }else if (coin_type == type_name::get<BTC>()) {
+            token_ids::btc()
+        }else if (coin_type == type_name::get<ETH>()) {
+            token_ids::eth()
+        }else if (coin_type == type_name::get<USDC>()) {
+            token_ids::usdc()
+        }else if (coin_type == type_name::get<USDT>()) {
+            token_ids::usdt()
+        }else {
+            abort EUnsupportedTokenType
+        }
     }
 }

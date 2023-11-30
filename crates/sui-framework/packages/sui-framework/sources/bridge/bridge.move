@@ -1,10 +1,8 @@
 // Copyright (c) Mysten Labs, Inc.
 // SPDX-License-Identifier: Apache-2.0
 
+#[allow(unused_const)]
 module sui::bridge {
-    use std::ascii::String;
-    use std::string;
-    use std::type_name;
     use std::vector;
 
     use sui::address;
@@ -12,7 +10,7 @@ module sui::bridge {
     use sui::bcs;
     use sui::bridge_committee::{Self, BridgeCommittee};
     use sui::bridge_escrow::{Self, BridgeEscrow};
-    use sui::bridge_treasury::{Self, BridgeTreasury};
+    use sui::bridge_treasury::{Self, BridgeTreasury, token_id};
     use sui::chain_ids;
     use sui::coin::{Self, Coin};
     use sui::event::emit;
@@ -20,6 +18,15 @@ module sui::bridge {
     use sui::table::{Self, Table};
     use sui::transfer;
     use sui::tx_context::{Self, TxContext};
+
+    #[test_only]
+    use std::debug::print;
+    #[test_only]
+    use sui::bridge_treasury::USDC;
+    #[test_only]
+    use sui::hex;
+    #[test_only]
+    use sui::test_scenario;
 
     struct Bridge has key {
         id: UID,
@@ -37,12 +44,16 @@ module sui::bridge {
     }
 
     // message types
-    const TOKEN_BRIDGE_MSG: u8 = 0;
-    //const OBJ_BRIDGE_MSG: u8 = 1;
+    const EMERGENCY_OP: u8 = 0;
+    const COMMITTEE_BLOCKLIST: u8 = 1;
+    const COMMITTEE_CHANGE: u8 = 2;
+    const TOKEN: u8 = 3;
+    const NFT: u8 = 4;
 
     struct BridgeMessage has copy, store, drop {
         // 0: token , 1: object ? TBD
         message_type: u8,
+        version: u8,
         source_chain: u8,
         bridge_seq_num: u64,
         sender_address: vector<u8>,
@@ -91,21 +102,18 @@ module sui::bridge {
     }
 
     fun serialise_token_bridge_payload<T>(token: &Coin<T>): vector<u8> {
-        let coin_type = bcs::to_bytes(type_name::borrow_string(&type_name::get<T>()));
+        let payload = vector[];
+        let coin_type = bcs::to_bytes(&token_id<T>());
+        vector::append(&mut payload, coin_type);
         let amount = bcs::to_bytes(&balance::value(coin::balance(token)));
-        vector::append(&mut coin_type, amount);
-        coin_type
+        vector::append(&mut payload, amount);
+        payload
     }
 
-    fun deserialise_token_bridge_payload(message: vector<u8>): (String, u64) {
+    fun deserialise_token_bridge_payload(message: vector<u8>): (u8, u64) {
         let bcs = bcs::new(message);
-        let payload = bcs::peel_vec_vec_u8(&mut bcs);
-        assert!(vector::length(&payload) == 2, EMalformedMessageError);
-        let amount_bytes = bcs::new(vector::pop_back(&mut payload));
-        let amount = bcs::peel_u64(&mut amount_bytes);
-
-        let coin_type_bytes = bcs::new(vector::pop_back(&mut payload));
-        let coin_type = string::to_ascii(string::utf8(bcs::peel_vec_u8(&mut coin_type_bytes)));
+        let coin_type = bcs::peel_u8(&mut bcs);
+        let amount = bcs::peel_u64(&mut bcs);
         (coin_type, amount)
     }
 
@@ -113,6 +121,7 @@ module sui::bridge {
         let bcs = bcs::new(message);
         BridgeMessage {
             message_type: bcs::peel_u8(&mut bcs),
+            version: bcs::peel_u8(&mut bcs),
             bridge_seq_num: bcs::peel_u64(&mut bcs),
             source_chain: bcs::peel_u8(&mut bcs),
             sender_address: bcs::peel_vec_u8(&mut bcs),
@@ -125,6 +134,7 @@ module sui::bridge {
     fun serialise_message(message: BridgeMessage): vector<u8> {
         let BridgeMessage {
             message_type,
+            version,
             bridge_seq_num,
             source_chain,
             sender_address,
@@ -135,6 +145,7 @@ module sui::bridge {
 
         let message = vector[];
         vector::push_back(&mut message, message_type);
+        vector::push_back(&mut message, version);
         vector::append(&mut message, bcs::to_bytes(&bridge_seq_num));
         vector::push_back(&mut message, source_chain);
         vector::append(&mut message, bcs::to_bytes(&sender_address));
@@ -158,7 +169,8 @@ module sui::bridge {
         // create bridge message
         let payload = serialise_token_bridge_payload(&token);
         let message = BridgeMessage {
-            message_type: TOKEN_BRIDGE_MSG,
+            message_type: TOKEN,
+            version: 1,
             source_chain: chain_ids::sui(),
             bridge_seq_num,
             sender_address: address::to_bytes(tx_context::sender(ctx)),
@@ -182,7 +194,7 @@ module sui::bridge {
     }
 
     // Record bridge message approvels in Sui, call by the bridge client
-    public fun approve_sui_bridge_request(
+    public fun approve_sui_bridge_message(
         self: &mut Bridge,
         bridge_seq_num: u64,
         signatures: vector<vector<u8>>,
@@ -203,8 +215,8 @@ module sui::bridge {
         table::add(&mut self.approved_messages, key, approved_message);
     }
 
-    // Record bridge message approvels in Sui, call by the bridge client
-    public fun approve_foreign_bridge_request(
+    // Record foreign bridge message approvels in Sui, call by the bridge client
+    public fun approve_foreign_bridge_message(
         self: &mut Bridge,
         message: vector<u8>,
         signatures: vector<vector<u8>>,
@@ -245,11 +257,11 @@ module sui::bridge {
         // get owner address
         let owner = address::from_bytes(message.target_address);
         // ensure this is a token bridge message
-        assert!(message.message_type == TOKEN_BRIDGE_MSG, EUnexpectedMessageType);
+        assert!(message.message_type == TOKEN, EUnexpectedMessageType);
         // extract token message
-        let (token_type, amount) = deserialise_token_bridge_payload(message.payload);
+        let (token_id, amount) = deserialise_token_bridge_payload(message.payload);
         // check token type
-        assert!(type_name::into_string(type_name::get<T>()) == token_type, EUnexpectedTokenType);
+        assert!(bridge_treasury::token_id<T>() == token_id, EUnexpectedTokenType);
         // claim from escrow or treasury
         let token = if (bridge_treasury::is_bridged_token<T>()) {
             bridge_treasury::mint<T>(&mut self.treasury, amount, ctx)
@@ -276,5 +288,40 @@ module sui::bridge {
     ) {
         let (token, owner) = claim_token_internal<T>(self, source_chain, bridge_seq_num, ctx);
         transfer::public_transfer(token, owner)
+    }
+
+    #[test]
+    fun test_message_serialisation() {
+        let sender_address = address::from_u256(100);
+        let scenario = test_scenario::begin(sender_address);
+        let ctx = test_scenario::ctx(&mut scenario);
+
+        let coin = coin::mint_for_testing<USDC>(12345, ctx);
+
+        print(&bcs::to_bytes(&address::to_bytes(sender_address)));
+
+        let token_bridge_message = BridgeMessage {
+            message_type: TOKEN,
+            version: 1,
+            source_chain: chain_ids::sui(),
+            bridge_seq_num: 10,
+            sender_address: address::to_bytes(sender_address),
+            target_chain: chain_ids::eth(),
+            target_address: address::to_bytes(address::from_u256(200)),
+            payload: serialise_token_bridge_payload(&coin)
+        };
+
+        let message = serialise_message(token_bridge_message);
+        let expected_msg = hex::decode(
+            b"03010a0000000000000000200000000000000000000000000000000000000000000000000000000000000064012000000000000000000000000000000000000000000000000000000000000000c8033930000000000000"
+        );
+        assert!(message == expected_msg, 0);
+
+        let deserialised = deserialise_message(message);
+
+        assert!(token_bridge_message == deserialised, 0);
+
+        coin::burn_for_testing(coin);
+        test_scenario::end(scenario);
     }
 }
