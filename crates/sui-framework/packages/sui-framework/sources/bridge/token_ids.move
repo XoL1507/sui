@@ -5,6 +5,7 @@ module sui::token_ids {
     const BTC: u8 = 1;
     const ETH: u8 = 2;
     const USDC: u8 = 3;
+    const USDT: u8 = 4;
 
     public fun sui(): u8 {
         SUI
@@ -20,5 +21,9 @@ module sui::token_ids {
 
     public fun usdc(): u8 {
         USDC
+    }
+
+    public fun usdt(): u8 {
+        USDT
     }
 }

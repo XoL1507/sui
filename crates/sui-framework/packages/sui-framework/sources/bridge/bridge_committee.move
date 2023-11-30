@@ -2,11 +2,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 #[allow(unused_use)]
-module sui::bridge_governance {
+module sui::bridge_committee {
     use std::vector;
 
     use sui::ecdsa_r1;
     use sui::vec_map::{Self, VecMap};
+
+    friend sui::bridge;
 
     const ESignatureBelowThreshold: u64 = 0;
 
@@ -14,6 +16,13 @@ module sui::bridge_governance {
         // commitee pub key and weight
         pub_keys: VecMap<vector<u8>, u64>,
         threshold: u64
+    }
+
+    public(friend) fun create_genesis_static_committee(): BridgeCommittee{
+        BridgeCommittee{
+            pub_keys: vec_map::empty<vector<u8>, u64>(),
+            threshold: 10
+        }
     }
 
     public fun verify_signatures(
@@ -34,5 +43,17 @@ module sui::bridge_governance {
         assert!(threshold >= committee.threshold, ESignatureBelowThreshold)
     }
 
+    public fun pause_bridge(self: &BridgeCommittee, bridge_pause_message: vector<u8>, signatures: vector<vector<u8>>) {
+        verify_signatures(self,bridge_pause_message,signatures)
+        // todo
+    }
 
+    public fun resume_bridge(
+        self: &BridgeCommittee,
+        bridge_resume_message: vector<u8>,
+        signatures: vector<vector<u8>>
+    ) {
+        verify_signatures(self,bridge_resume_message,signatures)
+        // todo
+    }
 }

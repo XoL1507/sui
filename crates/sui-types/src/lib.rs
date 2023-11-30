@@ -29,6 +29,7 @@ pub mod accumulator;
 pub mod authenticator_state;
 pub mod balance;
 pub mod base_types;
+pub mod bridge;
 pub mod clock;
 pub mod coin;
 pub mod collection_types;
@@ -119,6 +120,10 @@ pub const SUI_AUTHENTICATOR_STATE_OBJECT_ID: ObjectID =
 pub const SUI_RANDOMNESS_STATE_ADDRESS: AccountAddress = address_from_single_byte(8);
 pub const SUI_RANDOMNESS_STATE_OBJECT_ID: ObjectID =
     ObjectID::from_address(SUI_RANDOMNESS_STATE_ADDRESS);
+
+/// 0x8: hardcode object ID for the singleton bridge object.
+pub const SUI_BRIDGE_ADDRESS: AccountAddress = address_from_single_byte(9);
+pub const SUI_BRIDGE_OBJECT_ID: ObjectID = ObjectID::from_address(SUI_BRIDGE_ADDRESS);
 
 /// Return `true` if `addr` is a special system package that can be upgraded at epoch boundaries.
 /// All new system package ID's must be added here.

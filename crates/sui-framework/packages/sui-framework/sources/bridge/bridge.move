@@ -10,13 +10,13 @@ module sui::bridge {
     use sui::address;
     use sui::balance;
     use sui::bcs;
+    use sui::bridge_committee::{Self, BridgeCommittee};
     use sui::bridge_escrow::{Self, BridgeEscrow};
-    use sui::bridge_governance::{Self, BridgeCommittee};
     use sui::bridge_treasury::{Self, BridgeTreasury};
     use sui::chain_ids;
     use sui::coin::{Self, Coin};
     use sui::event::emit;
-    use sui::object::UID;
+    use sui::object::{Self, UID};
     use sui::table::{Self, Table};
     use sui::transfer;
     use sui::tx_context::{Self, TxContext};
@@ -33,7 +33,6 @@ module sui::bridge {
         treasury: BridgeTreasury,
         pending_messages: Table<BridgeMessageKey, BridgeMessage>,
         approved_messages: Table<BridgeMessageKey, ApprovedBridgeMessage>,
-
         paused: bool
     }
 
@@ -73,6 +72,23 @@ module sui::bridge {
     const EMalformedMessageError: u64 = 2;
     const EUnexpectedTokenType: u64 = 3;
     const EUnexpectedChainID: u64 = 4;
+    const ENotSystemAddress: u64 = 5;
+
+    #[allow(unused_function)]
+    fun create(ctx: &mut TxContext) {
+        assert!(tx_context::sender(ctx) == @0x0, ENotSystemAddress);
+        let bridge = Bridge {
+            id: object::bridge(),
+            sequence_num: 0,
+            committee: bridge_committee::create_genesis_static_committee(),
+            escrow: bridge_escrow::create(ctx),
+            treasury: bridge_treasury::create(ctx),
+            pending_messages: table::new<BridgeMessageKey, BridgeMessage>(ctx),
+            approved_messages: table::new<BridgeMessageKey, ApprovedBridgeMessage>(ctx),
+            paused: false
+        };
+        transfer::share_object(bridge)
+    }
 
     fun serialise_token_bridge_payload<T>(token: &Coin<T>): vector<u8> {
         let coin_type = bcs::to_bytes(type_name::borrow_string(&type_name::get<T>()));
@@ -129,7 +145,7 @@ module sui::bridge {
         message
     }
 
-    // Create bridge request to send token to ethereum, the request will be in pending state until approved
+    // Create bridge request to send token to other chain, the request will be in pending state until approved
     public fun send_token<T>(
         self: &mut Bridge,
         target_chain: u8,
@@ -161,6 +177,7 @@ module sui::bridge {
         table::add(&mut self.pending_messages, key, message);
 
         // emit event
+        // TODO: Approvals for bridge to other chains will not be consummed because claim happens on other chain, we need to archieve old approvals on Sui.
         emit(BridgeEvent { message, message_bytes: serialise_message(message) })
     }
 
@@ -176,14 +193,13 @@ module sui::bridge {
         let message = table::remove(&mut self.pending_messages,key);
         let message_bytes = serialise_message(message);
         // varify signatures
-        bridge_governance::verify_signatures(&self.committee, message_bytes, signatures);
+        bridge_committee::verify_signatures(&self.committee, message_bytes, signatures);
         let approved_message = ApprovedBridgeMessage {
             message,
             approved_epoch: tx_context::epoch(ctx),
             signatures,
         };
         // Store approval
-        // TODO: archieve approvals?
         table::add(&mut self.approved_messages, key, approved_message);
     }
 
@@ -195,7 +211,7 @@ module sui::bridge {
         ctx: &TxContext
     ) {
         // varify signatures
-        bridge_governance::verify_signatures(&self.committee, message, signatures);
+        bridge_committee::verify_signatures(&self.committee, message, signatures);
         let message = deserialise_message(message);
         // Ensure message is not from Sui
         assert!(message.source_chain != chain_ids::sui(), EUnexpectedChainID);
@@ -261,7 +277,4 @@ module sui::bridge {
         let (token, owner) = claim_token_internal<T>(self, source_chain, bridge_seq_num, ctx);
         transfer::public_transfer(token, owner)
     }
-
-    // TODO: red button
-    public fun pause_bridge(committee: &BridgeCommittee, nonce: u64, signatures: vector<vector<u8>>) {}
 }
