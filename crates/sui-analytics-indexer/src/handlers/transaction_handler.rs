@@ -5,6 +5,7 @@ use std::collections::BTreeSet;
 
 use anyhow::Result;
 use fastcrypto::encoding::{Base64, Encoding};
+use serde::Serialize;
 use tracing::error;
 
 use sui_indexer::framework::Handler;
@@ -120,7 +121,8 @@ impl TransactionHandler {
                 error!("Mismatch in move calls count: commands {move_calls_count} != {move_calls} calls");
             }
         }
-
+        let transaction_json = serde_json::to_string(&transaction)?;
+        let effects_json = serde_json::to_string(&checkpoint_transaction.effects)?;
         let entry = TransactionEntry {
             transaction_digest,
             checkpoint,
@@ -169,6 +171,8 @@ impl TransactionHandler {
 
             has_zklogin_sig: transaction.has_zklogin_sig(),
             has_upgraded_multisig: transaction.has_upgraded_multisig(),
+            transaction_json: Some(transaction_json),
+            effects_json: Some(effects_json),
         };
         self.transactions.push(entry);
     }
