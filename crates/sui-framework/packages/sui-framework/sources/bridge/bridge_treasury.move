@@ -63,7 +63,7 @@ module sui::bridge_treasury {
 
         let (treasury_cap, metadata) = coin::create_currency(
             USDC {},
-            8,
+            6,
             b"USDC",
             b"USDC Coin",
             b"Bridged USD Coin token",
@@ -75,7 +75,7 @@ module sui::bridge_treasury {
 
         let (treasury_cap, metadata) = coin::create_currency(
             USDT {},
-            8,
+            6,
             b"USDT",
             b"Tether",
             b"Bridged Tether token",

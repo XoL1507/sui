@@ -110,10 +110,10 @@ module sui::bridge {
         payload
     }
 
-    fun deserialise_token_bridge_payload(message: vector<u8>): (u8, u64) {
+    fun deserialise_token_bridge_payload(message: vector<u8>): (u8, u128) {
         let bcs = bcs::new(message);
         let coin_type = bcs::peel_u8(&mut bcs);
-        let amount = bcs::peel_u64(&mut bcs);
+        let amount = bcs::peel_u128(&mut bcs);
         (coin_type, amount)
     }
 

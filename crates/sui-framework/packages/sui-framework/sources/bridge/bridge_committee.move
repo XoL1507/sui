@@ -21,7 +21,7 @@ module sui::bridge_committee {
     public(friend) fun create_genesis_static_committee(): BridgeCommittee{
         BridgeCommittee{
             pub_keys: vec_map::empty<vector<u8>, u64>(),
-            threshold: 10
+            threshold: 0
         }
     }
 
