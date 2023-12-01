@@ -1,5 +1,14 @@
 # @mysten/dapp-kit
 
+## 0.10.2
+
+### Patch Changes
+
+- 2ae1a6a10: Early return on `useAutoConnectWallet` to improve account switching performance
+- Updated dependencies [cdcfa76c4]
+  - @mysten/sui.js@0.48.0
+  - @mysten/wallet-standard@0.8.11
+
 ## 0.10.1
 
 ### Patch Changes
