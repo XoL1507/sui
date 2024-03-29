@@ -4,15 +4,16 @@
 use std::collections::BTreeMap;
 
 use crate::{
-    models_v2::display::StoredDisplay,
+    models::display::StoredDisplay,
     types::{
         IndexedCheckpoint, IndexedDeletedObject, IndexedEpochInfo, IndexedEvent, IndexedObject,
         IndexedPackage, IndexedTransaction, TxIndex,
     },
 };
 
-pub mod checkpoint_handler_v2;
+pub mod checkpoint_handler;
 pub mod committer;
+pub mod objects_snapshot_processor;
 pub mod tx_processor;
 
 #[derive(Debug)]

@@ -8,16 +8,15 @@ use crate::{
         codes::{NameResolution, TypeSafety},
         Diagnostic,
     },
-    expansion::ast::{AbilitySet, ModuleIdent, ModuleIdent_, Visibility},
+    editions::FeatureGate,
+    expansion::ast::{AbilitySet, ModuleIdent, ModuleIdent_, Mutability, Visibility},
     ice,
     naming::ast::{
-        self as N, BlockLabel, BuiltinTypeName_, Color, ResolvedUseFuns, StructDefinition,
-        StructTypeParameter, TParam, TParamID, TVar, Type, TypeName, TypeName_, Type_, UseFunKind,
-        Var,
+        self as N, BlockLabel, BuiltinTypeName_, Color, IndexSyntaxMethods, ResolvedUseFuns,
+        StructDefinition, StructTypeParameter, TParam, TParamID, TVar, Type, TypeName, TypeName_,
+        Type_, UseFun, UseFunKind, Var,
     },
-    parser::ast::{
-        Ability_, ConstantName, Field, FunctionName, Mutability, StructName, ENTRY_MODIFIER,
-    },
+    parser::ast::{Ability_, ConstantName, Field, FunctionName, StructName, ENTRY_MODIFIER},
     shared::{known_attributes::TestingAttribute, program_info::*, unique_map::UniqueMap, *},
     FullyCompiledProgram,
 };
@@ -26,6 +25,7 @@ use move_symbol_pool::Symbol;
 use std::{
     cell::RefCell,
     collections::{BTreeMap, BTreeSet, HashMap},
+    sync::Arc,
 };
 
 //**************************************************************************************************
@@ -54,12 +54,6 @@ pub enum Constraint {
 pub type Constraints = Vec<Constraint>;
 pub type TParamSubst = HashMap<TParamID, Type>;
 
-pub struct Local {
-    pub mut_: Mutability,
-    pub ty: Type,
-    pub used_mut: Option<Loc>,
-}
-
 #[derive(Debug)]
 pub struct MacroCall {
     pub module: ModuleIdent,
@@ -87,7 +81,7 @@ pub struct Context<'env> {
     pub in_macro_function: bool,
     max_variable_color: RefCell<u16>,
     pub return_type: Option<Type>,
-    locals: UniqueMap<Var, Local>,
+    locals: UniqueMap<Var, Type>,
 
     pub subst: Subst,
     pub constraints: Constraints,
@@ -158,7 +152,7 @@ impl UseFunsScope {
 impl<'env> Context<'env> {
     pub fn new(
         env: &'env mut CompilationEnv,
-        _pre_compiled_lib: Option<&FullyCompiledProgram>,
+        _pre_compiled_lib: Option<Arc<FullyCompiledProgram>>,
         info: NamingProgramInfo,
     ) -> Self {
         let global_use_funs = UseFunsScope::global(&info);
@@ -195,7 +189,7 @@ impl<'env> Context<'env> {
     pub fn add_use_funs_scope(&mut self, new_scope: N::UseFuns) {
         let N::UseFuns {
             color,
-            resolved: new_scope,
+            resolved: mut new_scope,
             implicit_candidates,
         } = new_scope;
         assert!(
@@ -206,6 +200,40 @@ impl<'env> Context<'env> {
         if new_scope.is_empty() && cur.color == Some(color) {
             cur.count += 1;
             return;
+        }
+        for (tn, methods) in &mut new_scope {
+            for (method, use_fun) in methods.key_cloned_iter_mut() {
+                if use_fun.used || !matches!(use_fun.kind, UseFunKind::Explicit) {
+                    continue;
+                }
+                let mut same_target = false;
+                let mut case = None;
+                let Some(prev) = self.find_method_impl(tn, method, |prev| {
+                    if use_fun.target_function == prev.target_function {
+                        case = Some(match &prev.kind {
+                            UseFunKind::UseAlias | UseFunKind::Explicit => "Duplicate",
+                            UseFunKind::FunctionDeclaration => "Unnecessary",
+                        });
+                        same_target = true;
+                        // suppress unused warning
+                        prev.used = true;
+                    }
+                }) else {
+                    continue;
+                };
+                if same_target {
+                    let case = case.unwrap();
+                    let prev_loc = prev.loc;
+                    let (target_m, target_f) = &use_fun.target_function;
+                    let msg =
+                        format!("{case} method alias '{tn}.{method}' for '{target_m}::{target_f}'");
+                    self.env.add_diag(diag!(
+                        Declarations::DuplicateAlias,
+                        (use_fun.loc, msg),
+                        (prev_loc, "The same alias was previously declared here")
+                    ));
+                }
+            }
         }
         self.use_funs.push(UseFunsScope {
             count: 1,
@@ -262,11 +290,12 @@ impl<'env> Context<'env> {
         }
     }
 
-    pub fn find_method_and_mark_used(
+    fn find_method_impl(
         &mut self,
         tn: &TypeName,
         method: Name,
-    ) -> Option<(ModuleIdent, FunctionName)> {
+        mut fmap_use_fun: impl FnMut(&mut N::UseFun),
+    ) -> Option<&UseFun> {
         let cur_color = self.use_funs.last().unwrap().color;
         self.use_funs.iter_mut().rev().find_map(|scope| {
             // scope color is None for global scope, which is always in consideration
@@ -276,9 +305,18 @@ impl<'env> Context<'env> {
                 return None;
             }
             let use_fun = scope.use_funs.get_mut(tn)?.get_mut(&method)?;
-            use_fun.used = true;
-            Some(use_fun.target_function)
+            fmap_use_fun(use_fun);
+            Some(&*use_fun)
         })
+    }
+
+    pub fn find_method_and_mark_used(
+        &mut self,
+        tn: &TypeName,
+        method: Name,
+    ) -> Option<(ModuleIdent, FunctionName)> {
+        self.find_method_impl(tn, method, |use_fun| use_fun.used = true)
+            .map(|use_fun| use_fun.target_function)
     }
 
     /// true iff it is safe to expand,
@@ -476,13 +514,8 @@ impl<'env> Context<'env> {
             .push(Constraint::OrderedConstraint(loc, op, t))
     }
 
-    pub fn declare_local(&mut self, mut_: Mutability, var: Var, ty: Type) {
-        let local = Local {
-            mut_,
-            ty,
-            used_mut: None,
-        };
-        if let Err((_, prev_loc)) = self.locals.add(var, local) {
+    pub fn declare_local(&mut self, _: Mutability, var: Var, ty: Type) {
+        if let Err((_, prev_loc)) = self.locals.add(var, ty) {
             let msg = format!("ICE duplicate {var:?}. Should have been made unique in naming");
             self.env
                 .add_diag(ice!((var.loc, msg), (prev_loc, "Previously declared here")));
@@ -496,25 +529,7 @@ impl<'env> Context<'env> {
             return self.error_type(var.loc);
         }
 
-        self.locals.get(var).unwrap().ty.clone()
-    }
-
-    pub fn mark_mutable_usage(&mut self, loc: Loc, var: &Var) -> (Loc, Mutability) {
-        if !self.locals.contains_key(var) {
-            let msg = format!("ICE unbound {var:?}. Should have failed in naming");
-            self.env.add_diag(ice!((loc, msg)));
-            return (loc, Mutability::None);
-        }
-
-        // should not fail, already checked in naming
-        let decl_loc = *self.locals.get_loc(var).unwrap();
-        let local = self.locals.get_mut(var).unwrap();
-        local.used_mut = Some(loc);
-        (decl_loc, local.mut_)
-    }
-
-    pub fn take_locals(&mut self) -> UniqueMap<Var, Local> {
-        std::mem::take(&mut self.locals)
+        self.locals.get(var).unwrap().clone()
     }
 
     pub fn is_current_module(&self, m: &ModuleIdent) -> bool {
@@ -599,7 +614,7 @@ impl<'env> Context<'env> {
         self.macros.get(m)?.get(n)
     }
 
-    fn constant_info(&mut self, m: &ModuleIdent, n: &ConstantName) -> &ConstantInfo {
+    pub fn constant_info(&mut self, m: &ModuleIdent, n: &ConstantName) -> &ConstantInfo {
         let constants = &self.module_info(m).constants;
         constants.get(n).expect("ICE should have failed in naming")
     }
@@ -999,6 +1014,18 @@ pub fn make_field_type(
     }
 }
 
+pub fn find_index_funs(context: &mut Context, type_name: &TypeName) -> Option<IndexSyntaxMethods> {
+    let module_ident = match &type_name.value {
+        TypeName_::Multiple(_) => return None,
+        TypeName_::Builtin(builtin_name) => context.env.primitive_definer(builtin_name.value)?,
+        TypeName_::ModuleType(m, _) => m,
+    };
+    let module_defn = context.module_info(module_ident);
+    let entry = module_defn.syntax_methods.get(type_name)?;
+    let index = entry.index.clone()?;
+    Some(*index)
+}
+
 //**************************************************************************************************
 // Constants
 //**************************************************************************************************
@@ -1184,16 +1211,23 @@ pub fn make_function_type(
     let public_for_testing =
         public_testing_visibility(context.env, context.current_package, f, finfo.entry);
     let is_testing_context = context.is_testing_context();
+    let supports_public_package = context
+        .env
+        .supports_feature(context.current_package, FeatureGate::PublicPackage);
     match finfo.visibility {
         _ if is_testing_context && public_for_testing.is_some() => (),
         Visibility::Internal if in_current_module => (),
         Visibility::Internal => {
+            let friend_or_package = if supports_public_package {
+                Visibility::PACKAGE
+            } else {
+                Visibility::FRIEND
+            };
             let internal_msg = format!(
-                "This function is internal to its module. Only '{}', '{}', and '{}' functions can \
+                "This function is internal to its module. Only '{}' and '{}' functions can \
                  be called outside of their module",
                 Visibility::PUBLIC,
-                Visibility::FRIEND,
-                Visibility::PACKAGE
+                friend_or_package,
             );
             visibility_error(
                 context,
@@ -1669,6 +1703,30 @@ pub fn subst_tparams(subst: &TParamSubst, sp!(loc, t_): Type) -> Type {
     }
 }
 
+pub fn all_tparams(sp!(_, t_): Type) -> BTreeSet<TParam> {
+    use Type_::*;
+    match t_ {
+        Unit | UnresolvedError | Anything => BTreeSet::new(),
+        Var(_) => panic!("ICE tvar in all_tparams"),
+        Ref(_, t) => all_tparams(*t),
+        Param(tp) => BTreeSet::from([tp]),
+        Apply(_, _, ty_args) => {
+            let mut tparams = BTreeSet::new();
+            for arg in ty_args {
+                tparams.append(&mut all_tparams(arg));
+            }
+            tparams
+        }
+        Fun(args, result) => {
+            let mut tparams = all_tparams(*result);
+            for arg in args {
+                tparams.append(&mut all_tparams(arg));
+            }
+            tparams
+        }
+    }
+}
+
 pub fn ready_tvars(subst: &Subst, sp!(loc, t_): Type) -> Type {
     use Type_::*;
     match t_ {
@@ -1905,6 +1963,7 @@ pub fn give_tparams_all_abilities(sp!(_, ty_): &mut Type) {
 pub enum TypingError {
     SubtypeError(Box<Type>, Box<Type>),
     Incompatible(Box<Type>, Box<Type>),
+    InvariantError(Box<Type>, Box<Type>),
     ArityMismatch(usize, Box<Type>, usize, Box<Type>),
     FunArityMismatch(usize, Box<Type>, usize, Box<Type>),
     RecursiveType(Loc),
@@ -1913,6 +1972,7 @@ pub enum TypingError {
 #[derive(Clone, Copy, Debug)]
 enum TypingCase {
     Join,
+    Invariant,
     Subtype,
 }
 
@@ -1922,6 +1982,10 @@ pub fn subtype(subst: Subst, lhs: &Type, rhs: &Type) -> Result<(Subst, Type), Ty
 
 pub fn join(subst: Subst, lhs: &Type, rhs: &Type) -> Result<(Subst, Type), TypingError> {
     join_impl(subst, TypingCase::Join, lhs, rhs)
+}
+
+pub fn invariant(subst: Subst, lhs: &Type, rhs: &Type) -> Result<(Subst, Type), TypingError> {
+    join_impl(subst, TypingCase::Invariant, lhs, rhs)
 }
 
 fn join_impl(
@@ -1944,6 +2008,13 @@ fn join_impl(
                     // if 1 is imm and 2 is mut, use loc1. Else, loc2
                     let loc = if !*mut1 && *mut2 { *loc1 } else { *loc2 };
                     (loc, *mut1 && *mut2)
+                }
+                (Invariant, mut1, mut2) if mut1 == mut2 => (*loc1, *mut1),
+                (Invariant, _mut1, _mut2) => {
+                    return Err(TypingError::InvariantError(
+                        Box::new(lhs.clone()),
+                        Box::new(rhs.clone()),
+                    ))
                 }
                 // imm <: imm
                 // mut <: imm
@@ -2000,7 +2071,7 @@ fn join_impl(
             // TODO this is going to likely lead to some strange error locations/messages
             // since the RHS in subtyping is currently assumed to be an annotation
             let (subst, args) = match case {
-                Join => join_impl_types(subst, case, a1, a2)?,
+                Join | Invariant => join_impl_types(subst, case, a1, a2)?,
                 Subtype => join_impl_types(subst, case, a2, a1)?,
             };
             let (subst, result) = join_impl(subst, case, r1, r2)?;

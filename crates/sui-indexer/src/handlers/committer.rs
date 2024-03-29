@@ -12,10 +12,12 @@ use tracing::{error, info};
 use sui_types::messages_checkpoint::CheckpointSequenceNumber;
 
 use crate::metrics::IndexerMetrics;
-use crate::store::IndexerStoreV2;
+use crate::store::IndexerStore;
 use crate::types::IndexerResult;
 
 use super::{CheckpointDataToCommit, EpochToCommit};
+
+const CHECKPOINT_COMMIT_BATCH_SIZE: usize = 100;
 
 pub async fn start_tx_checkpoint_commit_task<S>(
     state: S,
@@ -23,13 +25,13 @@ pub async fn start_tx_checkpoint_commit_task<S>(
     tx_indexing_receiver: mysten_metrics::metered_channel::Receiver<CheckpointDataToCommit>,
     commit_notifier: watch::Sender<Option<CheckpointSequenceNumber>>,
 ) where
-    S: IndexerStoreV2 + Clone + Sync + Send + 'static,
+    S: IndexerStore + Clone + Sync + Send + 'static,
 {
     use futures::StreamExt;
 
     info!("Indexer checkpoint commit task started...");
     let checkpoint_commit_batch_size = std::env::var("CHECKPOINT_COMMIT_BATCH_SIZE")
-        .unwrap_or(5.to_string())
+        .unwrap_or(CHECKPOINT_COMMIT_BATCH_SIZE.to_string())
         .parse::<usize>()
         .unwrap();
     info!("Using checkpoint commit batch size {checkpoint_commit_batch_size}");
@@ -83,7 +85,7 @@ async fn commit_checkpoints<S>(
     metrics: &IndexerMetrics,
     commit_notifier: &watch::Sender<Option<CheckpointSequenceNumber>>,
 ) where
-    S: IndexerStoreV2 + Clone + Sync + Send + 'static,
+    S: IndexerStore + Clone + Sync + Send + 'static,
 {
     let mut checkpoint_batch = vec![];
     let mut tx_batch = vec![];

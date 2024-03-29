@@ -1,9 +1,11 @@
 // Copyright (c) Mysten Labs, Inc.
 // SPDX-License-Identifier: Apache-2.0
 
+use crate::client_ptb::ptb::PTB;
 use std::{
     collections::{btree_map::Entry, BTreeMap},
     fmt::{Debug, Display, Formatter, Write},
+    fs,
     path::PathBuf,
     str::FromStr,
     sync::Arc,
@@ -18,38 +20,35 @@ use fastcrypto::{
     traits::ToFromBytes,
 };
 
-use json_to_table::json_to_table;
+use move_binary_format::CompiledModule;
 use move_core_types::language_storage::TypeTag;
 use move_package::BuildConfig as MoveBuildConfig;
 use prometheus::Registry;
 use serde::Serialize;
 use serde_json::{json, Value};
 use sui_move::build::resolve_lock_file_path;
-use sui_protocol_config::ProtocolConfig;
+use sui_protocol_config::{Chain, ProtocolConfig, ProtocolVersion};
 use sui_source_validation::{BytecodeSourceVerifier, SourceMode};
 
 use shared_crypto::intent::Intent;
 use sui_execution::verifier::VerifierOverrides;
 use sui_json::SuiJsonValue;
 use sui_json_rpc_types::{
-    Coin, DynamicFieldPage, SuiCoinMetadata, SuiData, SuiObjectData, SuiObjectResponse,
-    SuiObjectResponseQuery, SuiParsedData, SuiRawData, SuiTransactionBlockEffectsAPI,
-    SuiTransactionBlockResponse, SuiTransactionBlockResponseOptions,
+    Coin, DynamicFieldPage, SuiCoinMetadata, SuiData, SuiExecutionStatus, SuiObjectData,
+    SuiObjectDataOptions, SuiObjectResponse, SuiObjectResponseQuery, SuiParsedData, SuiRawData,
+    SuiTransactionBlockEffectsAPI, SuiTransactionBlockResponse, SuiTransactionBlockResponseOptions,
 };
-use sui_json_rpc_types::{SuiExecutionStatus, SuiObjectDataOptions};
 use sui_keys::keystore::AccountKeystore;
 use sui_move_build::{
     build_from_resolution_graph, check_invalid_dependencies, check_unpublished_dependencies,
     gather_published_ids, BuildConfig, CompiledPackage, PackageDependencies, PublishedAtError,
 };
 use sui_replay::ReplayToolCommand;
-use sui_sdk::SuiClient;
 use sui_sdk::{
+    apis::ReadApi,
     sui_client_config::{SuiClientConfig, SuiEnv},
-    SUI_COIN_TYPE,
-};
-use sui_sdk::{
-    wallet_context::WalletContext, SUI_DEVNET_URL, SUI_LOCAL_NETWORK_URL, SUI_TESTNET_URL,
+    wallet_context::WalletContext,
+    SUI_COIN_TYPE, SUI_DEVNET_URL, SUI_LOCAL_NETWORK_URL, SUI_TESTNET_URL,
 };
 use sui_types::{
     base_types::{ObjectID, SequenceNumber, SuiAddress},
@@ -67,6 +66,7 @@ use sui_types::{
     transaction::{SenderSignedData, Transaction, TransactionData, TransactionDataAPI},
 };
 
+use json_to_table::json_to_table;
 use tabled::{
     builder::Builder as TableBuilder,
     settings::{
@@ -83,6 +83,7 @@ use crate::key_identity::{get_identity_address, KeyIdentity};
 #[cfg(test)]
 mod profiler_tests;
 
+#[macro_export]
 macro_rules! serialize_or_execute {
     ($tx_data:expr, $serialize_unsigned:expr, $serialize_signed:expr, $context:expr, $result_variant:ident) => {{
         assert!(
@@ -184,6 +185,10 @@ pub enum SuiClientCommands {
         /// Gas budget for this call
         #[clap(long)]
         gas_budget: u64,
+
+        /// Optional gas price for this call. Currently use only for testing and not in production enviroments.
+        #[clap(hide = true)]
+        gas_price: Option<u64>,
 
         /// Instead of executing the transaction, serialize the bcs bytes of the unsigned transaction data
         /// (TransactionData) using base64 encoding, and print out the string <TX_BYTES>. The string can
@@ -436,6 +441,10 @@ pub enum SuiClientCommands {
         serialize_signed_transaction: bool,
     },
 
+    /// Run a PTB either from file or from the provided args
+    #[clap(name = "ptb")]
+    PTB(PTB),
+
     /// Publish Move modules
     #[clap(name = "publish")]
     Publish {
@@ -653,9 +662,18 @@ pub enum SuiClientCommands {
     /// Run the bytecode verifier on the package
     #[clap(name = "verify-bytecode-meter")]
     VerifyBytecodeMeter {
-        /// Path to directory containing a Move package
-        #[clap(name = "package_path", global = true, default_value = ".")]
-        package_path: PathBuf,
+        /// Path to directory containing a Move package, (defaults to the current directory)
+        #[clap(name = "package", long, global = true)]
+        package_path: Option<PathBuf>,
+
+        /// Protocol version to use for the bytecode verifier (defaults to the latest protocol
+        /// version)
+        #[clap(name = "protocol-version", long)]
+        protocol_version: Option<u64>,
+
+        /// Path to specific pre-compiled module bytecode to verify (instead of an entire package)
+        #[clap(name = "module", long, global = true)]
+        module_path: Option<PathBuf>,
 
         /// Package build options
         #[clap(flatten)]
@@ -958,56 +976,17 @@ impl SuiClientCommands {
                 let sender = sender.unwrap_or(context.active_address()?);
 
                 let client = context.get_client().await?;
-                let (dependencies, compiled_modules, compiled_package, package_id) =
-                    compile_package(
-                        &client,
+
+                let (package_id, compiled_modules, dependencies, package_digest, upgrade_policy) =
+                    upgrade_package(
+                        client.read_api(),
                         build_config,
                         package_path,
+                        upgrade_capability,
                         with_unpublished_dependencies,
                         skip_dependency_verification,
                     )
                     .await?;
-
-                let package_id = package_id.map_err(|e| match e {
-                    PublishedAtError::NotPresent => {
-                        anyhow!("No 'published-at' field in manifest for package to be upgraded.")
-                    }
-                    PublishedAtError::Invalid(v) => anyhow!(
-                        "Invalid 'published-at' field in manifest of package to be upgraded. \
-                         Expected an on-chain address, but found: {v:?}"
-                    ),
-                })?;
-
-                let resp = context
-                    .get_client()
-                    .await?
-                    .read_api()
-                    .get_object_with_options(
-                        upgrade_capability,
-                        SuiObjectDataOptions::default().with_bcs().with_owner(),
-                    )
-                    .await?;
-
-                let Some(data) = resp.data else {
-                    return Err(anyhow!(
-                        "Could not find upgrade capability at {upgrade_capability}"
-                    ));
-                };
-
-                let upgrade_cap: UpgradeCap = data
-                    .bcs
-                    .ok_or_else(|| {
-                        anyhow!("Fetch upgrade capability object but no data was returned")
-                    })?
-                    .try_as_move()
-                    .ok_or_else(|| anyhow!("Upgrade capability is not a Move Object"))?
-                    .deserialize()?;
-                // We keep the existing policy -- no fancy policies or changing the upgrade
-                // policy at the moment. To change the policy you can call a Move function in the
-                // `package` module to change this policy.
-                let upgrade_policy = upgrade_cap.policy;
-                let package_digest =
-                    compiled_package.get_package_digest(with_unpublished_dependencies);
 
                 let data = client
                     .transaction_builder()
@@ -1061,7 +1040,7 @@ impl SuiClientCommands {
 
                 let client = context.get_client().await?;
                 let (dependencies, compiled_modules, _, _) = compile_package(
-                    &client,
+                    client.read_api(),
                     build_config,
                     package_path,
                     with_unpublished_dependencies,
@@ -1089,20 +1068,49 @@ impl SuiClientCommands {
             }
 
             SuiClientCommands::VerifyBytecodeMeter {
+                protocol_version,
+                module_path,
                 package_path,
                 build_config,
             } => {
-                let protocol_config = ProtocolConfig::get_for_max_version_UNSAFE();
+                let protocol_version =
+                    protocol_version.map_or(ProtocolVersion::MAX, ProtocolVersion::new);
+                let protocol_config =
+                    ProtocolConfig::get_for_version(protocol_version, Chain::Unknown);
+
                 let registry = &Registry::new();
                 let bytecode_verifier_metrics = Arc::new(BytecodeVerifierMetrics::new(registry));
 
-                let package = compile_package_simple(build_config, package_path)?;
-                let modules: Vec<_> = package.get_modules().cloned().collect();
+                let modules = match (module_path, package_path) {
+                    (Some(_), Some(_)) => {
+                        bail!("Cannot specify both a module path and a package path")
+                    }
+
+                    (Some(module_path), None) => {
+                        let module_bytes =
+                            fs::read(module_path).context("Failed to read module file")?;
+                        let module = CompiledModule::deserialize_with_defaults(&module_bytes)
+                            .context("Failed to deserialize module")?;
+                        vec![module]
+                    }
+
+                    (None, package_path) => {
+                        let package_path = package_path.unwrap_or_else(|| PathBuf::from("."));
+                        let package = compile_package_simple(build_config, package_path)?;
+                        package.get_modules().cloned().collect()
+                    }
+                };
 
                 let mut verifier =
                     sui_execution::verifier(&protocol_config, true, &bytecode_verifier_metrics);
                 let overrides = VerifierOverrides::new(None, None);
-                println!("Running bytecode verifier for {} modules", modules.len());
+
+                println!(
+                    "Running bytecode verifier for {} module{}",
+                    modules.len(),
+                    if modules.len() != 1 { "s" } else { "" },
+                );
+
                 let verifier_values = verifier.meter_compiled_modules_with_overrides(
                     &modules,
                     &protocol_config,
@@ -1165,12 +1173,14 @@ impl SuiClientCommands {
                 type_args,
                 gas,
                 gas_budget,
+                gas_price,
                 args,
                 serialize_unsigned_transaction,
                 serialize_signed_transaction,
             } => {
                 let tx_data = construct_move_call_transaction(
-                    package, &module, &function, type_args, gas, gas_budget, args, context,
+                    package, &module, &function, type_args, gas, gas_budget, gas_price, args,
+                    context,
                 )
                 .await?;
                 serialize_or_execute!(
@@ -1630,6 +1640,10 @@ impl SuiClientCommands {
 
                 SuiClientCommandResult::VerifySource
             }
+            SuiClientCommands::PTB(ptb) => {
+                ptb.execute(context).await?;
+                SuiClientCommandResult::NoOutput
+            }
         });
         ret
     }
@@ -1661,8 +1675,69 @@ fn compile_package_simple(
     )?)
 }
 
-async fn compile_package(
-    client: &SuiClient,
+pub(crate) async fn upgrade_package(
+    read_api: &ReadApi,
+    build_config: MoveBuildConfig,
+    package_path: PathBuf,
+    upgrade_capability: ObjectID,
+    with_unpublished_dependencies: bool,
+    skip_dependency_verification: bool,
+) -> Result<(ObjectID, Vec<Vec<u8>>, PackageDependencies, [u8; 32], u8), anyhow::Error> {
+    let (dependencies, compiled_modules, compiled_package, package_id) = compile_package(
+        read_api,
+        build_config,
+        package_path,
+        with_unpublished_dependencies,
+        skip_dependency_verification,
+    )
+    .await?;
+
+    let package_id = package_id.map_err(|e| match e {
+        PublishedAtError::NotPresent => {
+            anyhow!("No 'published-at' field in manifest for package to be upgraded.")
+        }
+        PublishedAtError::Invalid(v) => anyhow!(
+            "Invalid 'published-at' field in manifest of package to be upgraded. \
+                         Expected an on-chain address, but found: {v:?}"
+        ),
+    })?;
+
+    let resp = read_api
+        .get_object_with_options(
+            upgrade_capability,
+            SuiObjectDataOptions::default().with_bcs().with_owner(),
+        )
+        .await?;
+
+    let Some(data) = resp.data else {
+        return Err(anyhow!(
+            "Could not find upgrade capability at {upgrade_capability}"
+        ));
+    };
+
+    let upgrade_cap: UpgradeCap = data
+        .bcs
+        .ok_or_else(|| anyhow!("Fetch upgrade capability object but no data was returned"))?
+        .try_as_move()
+        .ok_or_else(|| anyhow!("Upgrade capability is not a Move Object"))?
+        .deserialize()?;
+    // We keep the existing policy -- no fancy policies or changing the upgrade
+    // policy at the moment. To change the policy you can call a Move function in the
+    // `package` module to change this policy.
+    let upgrade_policy = upgrade_cap.policy;
+    let package_digest = compiled_package.get_package_digest(with_unpublished_dependencies);
+
+    Ok((
+        package_id,
+        compiled_modules,
+        dependencies,
+        package_digest,
+        upgrade_policy,
+    ))
+}
+
+pub(crate) async fn compile_package(
+    read_api: &ReadApi,
     build_config: MoveBuildConfig,
     package_path: PathBuf,
     with_unpublished_dependencies: bool,
@@ -1713,7 +1788,7 @@ async fn compile_package(
     }
     let compiled_modules = compiled_package.get_package_bytes(with_unpublished_dependencies);
     if !skip_dependency_verification {
-        let verifier = BytecodeSourceVerifier::new(client.read_api());
+        let verifier = BytecodeSourceVerifier::new(read_api);
         if let Err(e) = verifier.verify_package_deps(&compiled_package).await {
             return Err(SuiError::ModulePublishFailure {
                 error: format!(
@@ -1775,6 +1850,7 @@ impl Display for SuiClientCommandResult {
                     1,
                     TableStyle::modern().get_horizontal(),
                 )]));
+                table.with(tabled::settings::style::BorderSpanCorrection);
                 write!(f, "{}", table)?;
             }
             SuiClientCommandResult::DynamicFieldQuery(df_refs) => {
@@ -1801,11 +1877,12 @@ impl Display for SuiClientCommandResult {
                 }
 
                 let mut builder = TableBuilder::default();
-                builder.set_header(vec!["gasCoinId", "gasBalance"]);
+                builder.set_header(vec!["gasCoinId", "mistBalance (MIST)", "suiBalance (SUI)"]);
                 for coin in &gas_coins {
                     builder.push_record(vec![
                         coin.gas_coin_id.to_string(),
-                        coin.gas_balance.to_string(),
+                        coin.mist_balance.to_string(),
+                        coin.sui_balance.to_string(),
                     ]);
                 }
                 let mut table = builder.build();
@@ -2027,6 +2104,7 @@ impl Display for SuiClientCommandResult {
                 writeln!(f, "{}", table)?;
             }
             SuiClientCommandResult::NoOutput => {}
+            SuiClientCommandResult::PTB(_) => {} // this is handled in PTB execute
         }
         write!(f, "{}", writer.trim_end_matches('\n'))
     }
@@ -2039,6 +2117,7 @@ async fn construct_move_call_transaction(
     type_args: Vec<TypeTag>,
     gas: Option<ObjectID>,
     gas_budget: u64,
+    gas_price: Option<u64>,
     args: Vec<SuiJsonValue>,
     context: &mut WalletContext,
 ) -> Result<TransactionData, anyhow::Error> {
@@ -2059,7 +2138,7 @@ async fn construct_move_call_transaction(
     client
         .transaction_builder()
         .move_call(
-            sender, package, module, function, type_args, args, gas, gas_budget,
+            sender, package, module, function, type_args, args, gas, gas_budget, gas_price,
         )
         .await
 }
@@ -2207,14 +2286,16 @@ impl From<&SuiObjectData> for ObjectOutput {
 #[serde(rename_all = "camelCase")]
 pub struct GasCoinOutput {
     pub gas_coin_id: ObjectID,
-    pub gas_balance: u64,
+    pub mist_balance: u64,
+    pub sui_balance: String,
 }
 
 impl From<&GasCoin> for GasCoinOutput {
     fn from(gas_coin: &GasCoin) -> Self {
         Self {
             gas_coin_id: *gas_coin.id(),
-            gas_balance: gas_coin.value(),
+            mist_balance: gas_coin.value(),
+            sui_balance: format_balance(gas_coin.value() as u128, 9, 2, None),
         }
     }
 }
@@ -2283,6 +2364,7 @@ pub enum SuiClientCommandResult {
     Pay(SuiTransactionBlockResponse),
     PayAllSui(SuiTransactionBlockResponse),
     PaySui(SuiTransactionBlockResponse),
+    PTB(SuiTransactionBlockResponse),
     Publish(SuiTransactionBlockResponse),
     RawObject(SuiObjectResponse),
     SerializedSignedTransaction(SenderSignedData),
@@ -2362,43 +2444,129 @@ fn pretty_print_balance(
     builder: &mut TableBuilder,
     with_coins: bool,
 ) {
+    let format_decmials = 2;
     let mut table_builder = TableBuilder::default();
+    if !with_coins {
+        table_builder.set_header(vec!["coin", "balance (raw)", "balance", ""]);
+    }
     for (metadata, coins) in coins_by_type {
-        let name = metadata
-            .as_ref()
-            .map(|x| x.name.as_str())
-            .unwrap_or_else(|| "unknown");
+        let (name, symbol, coin_decimals) = if let Some(metadata) = metadata {
+            (
+                metadata.name.as_str(),
+                metadata.symbol.as_str(),
+                metadata.decimals,
+            )
+        } else {
+            ("unknown", "unknown_symbol", 9)
+        };
+
+        let balance = coins.iter().map(|x| x.balance as u128).sum::<u128>();
+        let mut inner_table = TableBuilder::default();
+        inner_table.set_header(vec!["coinId", "balance (raw)", "balance", ""]);
+
         if with_coins {
             let coin_numbers = if coins.len() != 1 { "coins" } else { "coin" };
-            builder.push_record(vec![format!(
-                "{}: {} {coin_numbers}, Balance: {}\n ┌",
+            let balance_formatted = format!(
+                "({} {})",
+                format_balance(balance, coin_decimals, format_decmials, Some(symbol)),
+                symbol
+            );
+            let summary = format!(
+                "{}: {} {coin_numbers}, Balance: {} {}",
                 name,
                 coins.len(),
-                coins.iter().map(|x| x.balance as u128).sum::<u128>(),
-            )]);
-
-            let mut table_builder = TableBuilder::default();
+                balance,
+                balance_formatted
+            );
             for c in coins {
-                table_builder.push_record(vec![
-                    "│",
+                inner_table.push_record(vec![
                     c.coin_object_id.to_string().as_str(),
-                    format!("{}", c.balance).as_str(),
+                    c.balance.to_string().as_str(),
+                    format_balance(
+                        c.balance as u128,
+                        coin_decimals,
+                        format_decmials,
+                        Some(symbol),
+                    )
+                    .as_str(),
                 ]);
             }
-            builder.push_record(vec![table_builder
-                .build()
-                .with(TableStyle::empty())
-                .to_string()]);
-            builder.push_record(vec![format!(" └")]);
+            let mut table = inner_table.build();
+            table.with(TablePanel::header(summary));
+            table.with(
+                TableStyle::rounded()
+                    .horizontals([
+                        HorizontalLine::new(1, TableStyle::modern().get_horizontal()),
+                        HorizontalLine::new(2, TableStyle::modern().get_horizontal()),
+                    ])
+                    .remove_vertical(),
+            );
+            table.with(tabled::settings::style::BorderSpanCorrection);
+            builder.push_record(vec![table.to_string()]);
         } else {
             table_builder.push_record(vec![
                 name,
-                format!("{}", coins.iter().map(|x| x.balance as u128).sum::<u128>()).as_str(),
+                balance.to_string().as_str(),
+                format_balance(balance, coin_decimals, format_decmials, Some(symbol)).as_str(),
             ]);
         }
     }
-    builder.push_record(vec![table_builder
-        .build()
-        .with(TableStyle::blank())
-        .to_string()]);
+
+    let mut table = table_builder.build();
+    table.with(
+        TableStyle::rounded()
+            .horizontals([HorizontalLine::new(
+                1,
+                TableStyle::modern().get_horizontal(),
+            )])
+            .remove_vertical(),
+    );
+    table.with(tabled::settings::style::BorderSpanCorrection);
+    builder.push_record(vec![table.to_string()]);
+}
+
+fn divide(value: u128, divisor: u128) -> (u128, u128) {
+    let integer_part = value / divisor;
+    let fractional_part = value % divisor;
+    (integer_part, fractional_part)
+}
+
+fn format_balance(
+    value: u128,
+    coin_decimals: u8,
+    format_decimals: usize,
+    symbol: Option<&str>,
+) -> String {
+    let mut suffix = if let Some(symbol) = symbol {
+        format!(" {symbol}")
+    } else {
+        "".to_string()
+    };
+
+    let mut coin_decimals = coin_decimals as u32;
+    let billions = 10u128.pow(coin_decimals + 9);
+    let millions = 10u128.pow(coin_decimals + 6);
+    let thousands = 10u128.pow(coin_decimals + 3);
+    let units = 10u128.pow(coin_decimals);
+
+    let (whole, fractional) = if value > billions {
+        coin_decimals += 9;
+        suffix = format!("B{suffix}");
+        divide(value, billions)
+    } else if value > millions {
+        coin_decimals += 6;
+        suffix = format!("M{suffix}");
+        divide(value, millions)
+    } else if value > thousands {
+        coin_decimals += 3;
+        suffix = format!("K{suffix}");
+        divide(value, thousands)
+    } else {
+        divide(value, units)
+    };
+
+    let mut fractional = format!("{fractional:0width$}", width = coin_decimals as usize);
+    fractional.truncate(format_decimals);
+
+    format!("{whole}.{fractional}{suffix}")
 }

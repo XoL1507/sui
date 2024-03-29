@@ -24,6 +24,8 @@ pub enum KnownAttribute {
     Diagnostic(DiagnosticAttribute),
     DefinesPrimitive(DefinesPrimitive),
     External(ExternalAttribute),
+    Syntax(SyntaxAttribute),
+    Error(ErrorAttribute),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -56,10 +58,18 @@ pub enum DiagnosticAttribute {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum SyntaxAttribute {
+    Syntax,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct DefinesPrimitive;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct ExternalAttribute;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub struct ErrorAttribute;
 
 impl AttributePosition {
     const ALL: &'static [Self] = &[
@@ -86,6 +96,8 @@ impl KnownAttribute {
             DiagnosticAttribute::LINT_ALLOW => DiagnosticAttribute::LintAllow.into(),
             DefinesPrimitive::DEFINES_PRIM => DefinesPrimitive.into(),
             ExternalAttribute::EXTERNAL => ExternalAttribute.into(),
+            SyntaxAttribute::SYNTAX => SyntaxAttribute::Syntax.into(),
+            ErrorAttribute::ERROR => ErrorAttribute.into(),
             _ => return None,
         })
     }
@@ -98,6 +110,8 @@ impl KnownAttribute {
             Self::Diagnostic(a) => a.name(),
             Self::DefinesPrimitive(a) => a.name(),
             Self::External(a) => a.name(),
+            Self::Syntax(a) => a.name(),
+            Self::Error(a) => a.name(),
         }
     }
 
@@ -109,6 +123,8 @@ impl KnownAttribute {
             Self::Diagnostic(a) => a.expected_positions(),
             Self::DefinesPrimitive(a) => a.expected_positions(),
             Self::External(a) => a.expected_positions(),
+            Self::Syntax(a) => a.expected_positions(),
+            Self::Error(a) => a.expected_positions(),
         }
     }
 }
@@ -266,6 +282,41 @@ impl ExternalAttribute {
     }
 }
 
+impl SyntaxAttribute {
+    pub const SYNTAX: &'static str = "syntax";
+    pub const INDEX: &'static str = "index";
+    pub const FOR: &'static str = "for";
+    pub const ASSIGN: &'static str = "assign";
+
+    pub const fn name(&self) -> &str {
+        Self::SYNTAX
+    }
+
+    pub fn expected_positions(&self) -> &'static BTreeSet<AttributePosition> {
+        static ALLOW_WARNING_POSITIONS: Lazy<BTreeSet<AttributePosition>> =
+            Lazy::new(|| BTreeSet::from([AttributePosition::Function]));
+        &ALLOW_WARNING_POSITIONS
+    }
+
+    pub fn expected_syntax_cases() -> &'static [&'static str] {
+        &[Self::INDEX, Self::FOR, Self::ASSIGN]
+    }
+}
+
+impl ErrorAttribute {
+    pub const ERROR: &'static str = "error";
+
+    pub const fn name(&self) -> &str {
+        Self::ERROR
+    }
+
+    pub fn expected_positions(&self) -> &'static BTreeSet<AttributePosition> {
+        static ERROR_POSITIONS: Lazy<BTreeSet<AttributePosition>> =
+            Lazy::new(|| BTreeSet::from([AttributePosition::Constant]));
+        &ERROR_POSITIONS
+    }
+}
+
 //**************************************************************************************************
 // Display
 //**************************************************************************************************
@@ -294,6 +345,8 @@ impl fmt::Display for KnownAttribute {
             Self::Diagnostic(a) => a.fmt(f),
             Self::DefinesPrimitive(a) => a.fmt(f),
             Self::External(a) => a.fmt(f),
+            Self::Syntax(a) => a.fmt(f),
+            Self::Error(a) => a.fmt(f),
         }
     }
 }
@@ -334,6 +387,18 @@ impl fmt::Display for ExternalAttribute {
     }
 }
 
+impl fmt::Display for SyntaxAttribute {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.name())
+    }
+}
+
+impl fmt::Display for ErrorAttribute {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.name())
+    }
+}
+
 //**************************************************************************************************
 // From
 //**************************************************************************************************
@@ -366,5 +431,15 @@ impl From<DefinesPrimitive> for KnownAttribute {
 impl From<ExternalAttribute> for KnownAttribute {
     fn from(a: ExternalAttribute) -> Self {
         Self::External(a)
+    }
+}
+impl From<SyntaxAttribute> for KnownAttribute {
+    fn from(a: SyntaxAttribute) -> Self {
+        Self::Syntax(a)
+    }
+}
+impl From<ErrorAttribute> for KnownAttribute {
+    fn from(a: ErrorAttribute) -> Self {
+        Self::Error(a)
     }
 }

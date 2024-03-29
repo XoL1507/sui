@@ -1,5 +1,17 @@
 # @mysten/sui.js
 
+## 0.51.1
+
+### Patch Changes
+
+- 6984dd1e38: Update gql.tada and add type definitions for custom scalars
+
+## 0.51.0
+
+### Minor Changes
+
+- 0cafa94027: Remove deprecated types directory
+
 ## 0.50.1
 
 ### Patch Changes

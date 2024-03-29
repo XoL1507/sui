@@ -16,10 +16,13 @@ async-trait.workspace = true
 axum.workspace = true
 chrono.workspace = true
 clap.workspace = true
+const-str.workspace = true
 diesel.workspace = true
 either.workspace = true
 fastcrypto = { workspace = true, features = ["copy_key"] }
+fastcrypto-zkp.workspace = true
 futures.workspace = true
+git-version.workspace = true
 hex.workspace = true
 http.workspace = true
 hyper.workspace = true
@@ -48,12 +51,14 @@ sui-types.workspace = true
 tap.workspace = true
 telemetry-subscribers.workspace = true
 tracing.workspace = true
-tokio.workspace = true
+tokio = { workspace = true, features = ["rt-multi-thread"] }
+tokio-util = { workspace = true, features = ["rt"] }
 toml.workspace = true
 tower.workspace = true
 tower-http.workspace = true
 thiserror.workspace = true
 uuid.workspace = true
+im.workspace = true
 
 sui-graphql-rpc-headers.workspace = true
 sui-graphql-rpc-client.workspace = true
@@ -71,7 +76,6 @@ sui-swarm-config.workspace = true
 test-cluster.workspace = true
 sui-protocol-config.workspace = true
 move-bytecode-utils.workspace = true
-workspace-hack.workspace = true
 sui-package-resolver.workspace = true
 
 [dev-dependencies]

@@ -7,14 +7,15 @@ use tokio::task::JoinHandle;
 
 use std::env;
 use std::net::SocketAddr;
+use std::time::Duration;
 use sui_json_rpc_types::SuiTransactionBlockResponse;
 use tracing::info;
 
-use crate::db::{new_pg_connection_pool, reset_database};
+use crate::db::{new_pg_connection_pool_with_config, reset_database, PgConnectionPoolConfig};
 use crate::errors::IndexerError;
+use crate::handlers::objects_snapshot_processor::SnapshotLagConfig;
 use crate::indexer::Indexer;
-use crate::processors_v2::objects_snapshot_processor::SnapshotLagConfig;
-use crate::store::PgIndexerStoreV2;
+use crate::store::PgIndexerStore;
 use crate::{IndexerConfig, IndexerMetrics};
 
 pub enum ReaderWriterConfig {
@@ -40,7 +41,7 @@ pub async fn start_test_indexer(
     db_url: Option<String>,
     rpc_url: String,
     reader_writer_config: ReaderWriterConfig,
-) -> (PgIndexerStoreV2, JoinHandle<Result<(), IndexerError>>) {
+) -> (PgIndexerStore, JoinHandle<Result<(), IndexerError>>) {
     start_test_indexer_impl(db_url, rpc_url, reader_writer_config, None).await
 }
 
@@ -49,7 +50,7 @@ pub async fn start_test_indexer_impl(
     rpc_url: String,
     reader_writer_config: ReaderWriterConfig,
     new_database: Option<String>,
-) -> (PgIndexerStoreV2, JoinHandle<Result<(), IndexerError>>) {
+) -> (PgIndexerStore, JoinHandle<Result<(), IndexerError>>) {
     // Reduce the connection pool size to 10 for testing
     // to prevent maxing out
     info!("Setting DB_POOL_SIZE to 10");
@@ -62,6 +63,22 @@ pub async fn start_test_indexer_impl(
         format!("postgres://postgres:{pw}@{pg_host}:{pg_port}")
     });
 
+    // dynamically set ports instead of all to 9000
+    let base_port = rpc_url
+        .chars()
+        .rev()
+        .take(4)
+        .collect::<String>()
+        .chars()
+        .rev()
+        .collect::<String>()
+        .parse::<u16>()
+        .unwrap();
+
+    // Set connection timeout for tests to 1 second
+    let mut pool_config = PgConnectionPoolConfig::default();
+    pool_config.set_connection_timeout(Duration::from_secs(1));
+
     // Default writer mode
     let mut config = IndexerConfig {
         db_url: Some(db_url.clone()),
@@ -69,6 +86,7 @@ pub async fn start_test_indexer_impl(
         reset_db: true,
         fullnode_sync_worker: true,
         rpc_server_worker: false,
+        rpc_server_port: base_port + 1,
         ..Default::default()
     };
 
@@ -85,7 +103,8 @@ pub async fn start_test_indexer_impl(
         let (default_db_url, _) = replace_db_name(&parsed_url, "postgres");
 
         // Open in default mode
-        let blocking_pool = new_pg_connection_pool(&default_db_url, Some(5)).unwrap();
+        let blocking_pool =
+            new_pg_connection_pool_with_config(&default_db_url, Some(5), pool_config).unwrap();
         let mut default_conn = blocking_pool.get().unwrap();
 
         // Delete the old db if it exists
@@ -100,8 +119,9 @@ pub async fn start_test_indexer_impl(
         parsed_url = replace_db_name(&parsed_url, &new_database).0;
     }
 
-    let blocking_pool = new_pg_connection_pool(&parsed_url, Some(5)).unwrap();
-    let store = PgIndexerStoreV2::new(blocking_pool.clone(), indexer_metrics.clone());
+    let blocking_pool =
+        new_pg_connection_pool_with_config(&parsed_url, Some(5), pool_config).unwrap();
+    let store = PgIndexerStore::new(blocking_pool.clone(), indexer_metrics.clone());
 
     let handle = match reader_writer_config {
         ReaderWriterConfig::Reader {
@@ -152,8 +172,12 @@ pub async fn force_delete_database(db_url: String) {
     // This is necessary because you can't drop a database while being connected to it.
     // Hence switch to the default `postgres` database to drop the active database.
     let (default_db_url, db_name) = replace_db_name(&db_url, "postgres");
+    // Set connection timeout for tests to 1 second
+    let mut pool_config = PgConnectionPoolConfig::default();
+    pool_config.set_connection_timeout(Duration::from_secs(1));
 
-    let blocking_pool = new_pg_connection_pool(&default_db_url, Some(5)).unwrap();
+    let blocking_pool =
+        new_pg_connection_pool_with_config(&default_db_url, Some(5), pool_config).unwrap();
     blocking_pool
         .get()
         .unwrap()
