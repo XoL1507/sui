@@ -56,3 +56,4 @@ Use the following links to learn more about Sui and the Sui ecosystem:
  * Join the Sui community on [Sui Discord](https://discord.gg/sui).
  * Find out more about the Sui ecosystem on the [Sui Resources](https://sui.io/resources/) page.
  * Review information about Sui governance, [decentralization](https://suifoundation.org/decentralization), and [Developer Grants Program](https://sui.io/grants-hub) on the [Sui Foundation](https://suifoundation.org/) site.
+    
