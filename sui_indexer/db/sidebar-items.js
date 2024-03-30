@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"fn":["get_pg_pool_connection","new_pg_connection_pool","new_pg_connection_pool_with_config","reset_database"],"struct":["PgConnectionConfig","PgConnectionPoolConfig"],"type":["PgConnectionPool","PgPoolConnection"]};
