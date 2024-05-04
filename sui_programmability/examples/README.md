@@ -9,4 +9,4 @@ Lots of Move code examples, partitioned by category:
 
 We welcome third-party examples--please just submit a pull request!
 
-DISCLAIMER: This is example code provided for demonstration purposes only. These examples have not been thoroughly tested, verified, or audited. Please do not use the example code or derivatives in production without proper diligence.
+DISCLAIMER: This is example code provided for demonstration purposes only. These examples have not been thoroughly tested, verified, or audited. Please do not use the example code or derivatives in production without proper diligence..
