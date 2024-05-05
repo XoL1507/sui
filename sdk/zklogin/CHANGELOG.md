@@ -1,5 +1,25 @@
 # @mysten/zklogin
 
+## 0.6.0
+
+### Minor Changes
+
+- e279098cff: add support for verify zklogin signature in sdk
+
+## 0.5.3
+
+### Patch Changes
+
+- Updated dependencies [929db4976a]
+  - @mysten/sui.js@0.52.0
+
+## 0.5.2
+
+### Patch Changes
+
+- Updated dependencies [b4ecdb5860]
+  - @mysten/sui.js@0.51.2
+
 ## 0.5.1
 
 ### Patch Changes

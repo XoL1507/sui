@@ -4,6 +4,7 @@
 use anyhow::Result;
 use sui_rest_api::{CheckpointData, Client};
 use sui_types::messages_checkpoint::CheckpointSequenceNumber;
+use tokio_util::sync::CancellationToken;
 use tracing::{info, warn};
 
 use crate::metrics::IndexerMetrics;
@@ -19,10 +20,11 @@ pub struct CheckpointFetcher {
     highest_known_checkpoint: CheckpointSequenceNumber,
     sender: mysten_metrics::metered_channel::Sender<CheckpointDownloadData>,
     metrics: IndexerMetrics,
+    cancel: CancellationToken,
 }
 
 impl CheckpointFetcher {
-    const INTERVAL_PERIOD: std::time::Duration = std::time::Duration::from_secs(5);
+    const INTERVAL_MS: usize = 500;
     const CHECKPOINT_DOWNLOAD_CONCURRENCY: usize = 100;
 
     pub fn new(
@@ -30,6 +32,7 @@ impl CheckpointFetcher {
         last_downloaded_checkpoint: Option<CheckpointSequenceNumber>,
         sender: mysten_metrics::metered_channel::Sender<CheckpointDownloadData>,
         metrics: IndexerMetrics,
+        cancel: CancellationToken,
     ) -> Self {
         Self {
             client,
@@ -37,16 +40,26 @@ impl CheckpointFetcher {
             highest_known_checkpoint: 0,
             sender,
             metrics,
+            cancel,
         }
     }
 
     pub async fn run(mut self) {
-        let mut interval = tokio::time::interval(Self::INTERVAL_PERIOD);
+        let interval_ms = std::env::var("CHECKPOINT_FETCH_INTERVAL_MS")
+            .unwrap_or_else(|_| Self::INTERVAL_MS.to_string())
+            .parse::<u64>()
+            .expect("Invalid interval");
+        let interval_duration = std::time::Duration::from_millis(interval_ms);
+        let mut interval = tokio::time::interval(interval_duration);
         interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
         info!("CheckpointFetcher started");
 
         loop {
+            if self.cancel.is_cancelled() {
+                info!("Cancelling CheckpointFetcher.run");
+                break;
+            }
             interval.tick().await;
 
             if let Err(e) = self.update_highest_known_checkpoint().await {
@@ -92,6 +105,10 @@ impl CheckpointFetcher {
             .buffered(Self::CHECKPOINT_DOWNLOAD_CONCURRENCY);
 
         while let Some(maybe_checkpoint) = checkpoint_stream.next().await {
+            if self.cancel.is_cancelled() {
+                info!("Cancelling CheckpointFetcher.download_checkpoints task");
+                break;
+            }
             let checkpoint = maybe_checkpoint?;
             self.last_downloaded_checkpoint =
                 Some(*checkpoint.checkpoint_summary.sequence_number());
@@ -99,6 +116,10 @@ impl CheckpointFetcher {
             info!(
                 checkpoint = checkpoint.checkpoint_summary.sequence_number(),
                 "successfully downloaded checkpoint"
+            );
+            self.metrics.download_lag_ms.set(
+                chrono::Utc::now().timestamp_millis()
+                    - checkpoint.checkpoint_summary.timestamp_ms as i64,
             );
 
             let checkpoint_bytes_size = bcs::serialized_size(&checkpoint)?;

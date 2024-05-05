@@ -1,5 +1,44 @@
 # @mysten/zksend
 
+## 0.6.0
+
+### Minor Changes
+
+- 905bc99e88: Add `createSendToAddressTransaction` method
+
+### Patch Changes
+
+- 9a9ff3cde1: Fix assets extracted from transactionBlocks using type instead of objectType from object changes"
+
+## 0.5.0
+
+### Minor Changes
+
+- 44ba140be0: Add `getSentTransactionBlocksWithLinks` helper
+
+## 0.4.4
+
+### Patch Changes
+
+- Updated dependencies [929db4976a]
+  - @mysten/sui.js@0.52.0
+  - @mysten/wallet-standard@0.11.3
+
+## 0.4.3
+
+### Patch Changes
+
+- 59168f73ff: Make contract optional in ZkLSendLinkBuilder.createLinks
+- b8f2a859ce: Handle the fetch function for environments that don't support window
+
+## 0.4.2
+
+### Patch Changes
+
+- Updated dependencies [b4ecdb5860]
+  - @mysten/sui.js@0.51.2
+  - @mysten/wallet-standard@0.11.2
+
 ## 0.4.1
 
 ### Patch Changes

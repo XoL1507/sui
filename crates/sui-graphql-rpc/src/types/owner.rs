@@ -7,7 +7,6 @@ use super::cursor::Page;
 use super::dynamic_field::DynamicField;
 use super::dynamic_field::DynamicFieldName;
 use super::move_package::MovePackage;
-use super::object::ObjectLookupKey;
 use super::stake::StakedSui;
 use super::suins_registration::{DomainFormat, NameService, SuinsRegistration};
 use crate::data::Db;
@@ -27,17 +26,15 @@ use sui_types::gas_coin::GAS;
 #[derive(Clone, Debug)]
 pub(crate) struct Owner {
     pub address: SuiAddress,
-    /// The checkpoint sequence number at which this was viewed at, or None if the data was
-    /// requested at the latest checkpoint.
-    pub checkpoint_viewed_at: Option<u64>,
+    /// The checkpoint sequence number at which this was viewed at.
+    pub checkpoint_viewed_at: u64,
 }
 
 /// Type to implement GraphQL fields that are shared by all Owners.
 pub(crate) struct OwnerImpl {
     pub address: SuiAddress,
-    /// The checkpoint sequence number at which this was viewed at, or None if the data was
-    /// requested at the latest checkpoint.
-    pub checkpoint_viewed_at: Option<u64>,
+    /// The checkpoint sequence number at which this was viewed at.
+    pub checkpoint_viewed_at: u64,
 }
 
 /// Interface implemented by GraphQL types representing entities that can own objects. Object owners
@@ -237,12 +234,9 @@ impl Owner {
 
     async fn as_object(&self, ctx: &Context<'_>) -> Result<Option<Object>> {
         Object::query(
-            ctx.data_unchecked(),
+            ctx,
             self.address,
-            match self.checkpoint_viewed_at {
-                Some(checkpoint_viewed_at) => ObjectLookupKey::LatestAt(checkpoint_viewed_at),
-                None => ObjectLookupKey::Latest,
-            },
+            Object::latest_at(self.checkpoint_viewed_at),
         )
         .await
         .extend()
@@ -451,7 +445,7 @@ impl OwnerImpl {
     ) -> Result<Option<DynamicField>> {
         use DynamicFieldType as T;
         DynamicField::query(
-            ctx.data_unchecked(),
+            ctx,
             self.address,
             parent_version,
             name,
@@ -470,7 +464,7 @@ impl OwnerImpl {
     ) -> Result<Option<DynamicField>> {
         use DynamicFieldType as T;
         DynamicField::query(
-            ctx.data_unchecked(),
+            ctx,
             self.address,
             parent_version,
             name,

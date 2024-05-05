@@ -1176,11 +1176,11 @@ do not have this capability:
 
 
 
-<a name="0xdee9_clob_v2_EInvalidTickSizeLotSize"></a>
+<a name="0xdee9_clob_v2_EInvalidTickSizeMinSize"></a>
 
 
 
-<pre><code><b>const</b> <a href="clob_v2.md#0xdee9_clob_v2_EInvalidTickSizeLotSize">EInvalidTickSizeLotSize</a>: u64 = 20;
+<pre><code><b>const</b> <a href="clob_v2.md#0xdee9_clob_v2_EInvalidTickSizeMinSize">EInvalidTickSizeMinSize</a>: u64 = 20;
 </code></pre>
 
 
@@ -1199,6 +1199,15 @@ do not have this capability:
 
 
 <pre><code><b>const</b> <a href="clob_v2.md#0xdee9_clob_v2_FEE_AMOUNT_FOR_CREATE_POOL">FEE_AMOUNT_FOR_CREATE_POOL</a>: u64 = 100000000000;
+</code></pre>
+
+
+
+<a name="0xdee9_clob_v2_LOT_SIZE"></a>
+
+
+
+<pre><code><b>const</b> <a href="clob_v2.md#0xdee9_clob_v2_LOT_SIZE">LOT_SIZE</a>: u64 = 1000;
 </code></pre>
 
 
@@ -1428,7 +1437,7 @@ Destroy the given <code>pool_owner_cap</code> object
 
 
 
-<pre><code><b>fun</b> <a href="clob_v2.md#0xdee9_clob_v2_create_pool_">create_pool_</a>&lt;BaseAsset, QuoteAsset&gt;(taker_fee_rate: u64, maker_rebate_rate: u64, tick_size: u64, lot_size: u64, creation_fee: <a href="../sui-framework/balance.md#0x2_balance_Balance">balance::Balance</a>&lt;<a href="../sui-framework/sui.md#0x2_sui_SUI">sui::SUI</a>&gt;, ctx: &<b>mut</b> <a href="../sui-framework/tx_context.md#0x2_tx_context_TxContext">tx_context::TxContext</a>)
+<pre><code><b>fun</b> <a href="clob_v2.md#0xdee9_clob_v2_create_pool_">create_pool_</a>&lt;BaseAsset, QuoteAsset&gt;(taker_fee_rate: u64, maker_rebate_rate: u64, tick_size: u64, min_size: u64, creation_fee: <a href="../sui-framework/balance.md#0x2_balance_Balance">balance::Balance</a>&lt;<a href="../sui-framework/sui.md#0x2_sui_SUI">sui::SUI</a>&gt;, ctx: &<b>mut</b> <a href="../sui-framework/tx_context.md#0x2_tx_context_TxContext">tx_context::TxContext</a>)
 </code></pre>
 
 
@@ -1441,7 +1450,7 @@ Destroy the given <code>pool_owner_cap</code> object
     taker_fee_rate: u64,
     maker_rebate_rate: u64,
     tick_size: u64,
-    lot_size: u64,
+    min_size: u64,
     creation_fee: Balance&lt;SUI&gt;,
     ctx: &<b>mut</b> TxContext,
 ) {
@@ -1449,7 +1458,7 @@ Destroy the given <code>pool_owner_cap</code> object
         taker_fee_rate,
         maker_rebate_rate,
         tick_size,
-        lot_size,
+        min_size,
         creation_fee,
         ctx
     );
@@ -1469,7 +1478,7 @@ Destroy the given <code>pool_owner_cap</code> object
 
 
 
-<pre><code><b>public</b> <b>fun</b> <a href="clob_v2.md#0xdee9_clob_v2_create_pool">create_pool</a>&lt;BaseAsset, QuoteAsset&gt;(tick_size: u64, lot_size: u64, creation_fee: <a href="../sui-framework/coin.md#0x2_coin_Coin">coin::Coin</a>&lt;<a href="../sui-framework/sui.md#0x2_sui_SUI">sui::SUI</a>&gt;, ctx: &<b>mut</b> <a href="../sui-framework/tx_context.md#0x2_tx_context_TxContext">tx_context::TxContext</a>)
+<pre><code><b>public</b> <b>fun</b> <a href="clob_v2.md#0xdee9_clob_v2_create_pool">create_pool</a>&lt;BaseAsset, QuoteAsset&gt;(tick_size: u64, min_size: u64, creation_fee: <a href="../sui-framework/coin.md#0x2_coin_Coin">coin::Coin</a>&lt;<a href="../sui-framework/sui.md#0x2_sui_SUI">sui::SUI</a>&gt;, ctx: &<b>mut</b> <a href="../sui-framework/tx_context.md#0x2_tx_context_TxContext">tx_context::TxContext</a>)
 </code></pre>
 
 
@@ -1480,13 +1489,13 @@ Destroy the given <code>pool_owner_cap</code> object
 
 <pre><code><b>public</b> <b>fun</b> <a href="clob_v2.md#0xdee9_clob_v2_create_pool">create_pool</a>&lt;BaseAsset, QuoteAsset&gt;(
     tick_size: u64,
-    lot_size: u64,
+    min_size: u64,
     creation_fee: Coin&lt;SUI&gt;,
     ctx: &<b>mut</b> TxContext,
 ) {
     <a href="clob_v2.md#0xdee9_clob_v2_create_customized_pool">create_customized_pool</a>&lt;BaseAsset, QuoteAsset&gt;(
         tick_size,
-        lot_size,
+        min_size,
         <a href="clob_v2.md#0xdee9_clob_v2_REFERENCE_TAKER_FEE_RATE">REFERENCE_TAKER_FEE_RATE</a>,
         <a href="clob_v2.md#0xdee9_clob_v2_REFERENCE_MAKER_REBATE_RATE">REFERENCE_MAKER_REBATE_RATE</a>,
         creation_fee,
@@ -1508,7 +1517,7 @@ The taker_fee_rate should be greater than or equal to the maker_rebate_rate, and
 Taker_fee_rate of 0.25% should be 2_500_000 for example
 
 
-<pre><code><b>public</b> <b>fun</b> <a href="clob_v2.md#0xdee9_clob_v2_create_customized_pool">create_customized_pool</a>&lt;BaseAsset, QuoteAsset&gt;(tick_size: u64, lot_size: u64, taker_fee_rate: u64, maker_rebate_rate: u64, creation_fee: <a href="../sui-framework/coin.md#0x2_coin_Coin">coin::Coin</a>&lt;<a href="../sui-framework/sui.md#0x2_sui_SUI">sui::SUI</a>&gt;, ctx: &<b>mut</b> <a href="../sui-framework/tx_context.md#0x2_tx_context_TxContext">tx_context::TxContext</a>)
+<pre><code><b>public</b> <b>fun</b> <a href="clob_v2.md#0xdee9_clob_v2_create_customized_pool">create_customized_pool</a>&lt;BaseAsset, QuoteAsset&gt;(tick_size: u64, min_size: u64, taker_fee_rate: u64, maker_rebate_rate: u64, creation_fee: <a href="../sui-framework/coin.md#0x2_coin_Coin">coin::Coin</a>&lt;<a href="../sui-framework/sui.md#0x2_sui_SUI">sui::SUI</a>&gt;, ctx: &<b>mut</b> <a href="../sui-framework/tx_context.md#0x2_tx_context_TxContext">tx_context::TxContext</a>)
 </code></pre>
 
 
@@ -1519,7 +1528,7 @@ Taker_fee_rate of 0.25% should be 2_500_000 for example
 
 <pre><code><b>public</b> <b>fun</b> <a href="clob_v2.md#0xdee9_clob_v2_create_customized_pool">create_customized_pool</a>&lt;BaseAsset, QuoteAsset&gt;(
     tick_size: u64,
-    lot_size: u64,
+    min_size: u64,
     taker_fee_rate: u64,
     maker_rebate_rate: u64,
     creation_fee: Coin&lt;SUI&gt;,
@@ -1529,7 +1538,7 @@ Taker_fee_rate of 0.25% should be 2_500_000 for example
         taker_fee_rate,
         maker_rebate_rate,
         tick_size,
-        lot_size,
+        min_size,
         <a href="../sui-framework/coin.md#0x2_coin_into_balance">coin::into_balance</a>(creation_fee),
         ctx
     )
@@ -1547,7 +1556,7 @@ Taker_fee_rate of 0.25% should be 2_500_000 for example
 Helper function that all the create pools now call to create pools.
 
 
-<pre><code><b>fun</b> <a href="clob_v2.md#0xdee9_clob_v2_create_pool_with_return_">create_pool_with_return_</a>&lt;BaseAsset, QuoteAsset&gt;(taker_fee_rate: u64, maker_rebate_rate: u64, tick_size: u64, lot_size: u64, creation_fee: <a href="../sui-framework/balance.md#0x2_balance_Balance">balance::Balance</a>&lt;<a href="../sui-framework/sui.md#0x2_sui_SUI">sui::SUI</a>&gt;, ctx: &<b>mut</b> <a href="../sui-framework/tx_context.md#0x2_tx_context_TxContext">tx_context::TxContext</a>): (<a href="clob_v2.md#0xdee9_clob_v2_Pool">clob_v2::Pool</a>&lt;BaseAsset, QuoteAsset&gt;, <a href="clob_v2.md#0xdee9_clob_v2_PoolOwnerCap">clob_v2::PoolOwnerCap</a>)
+<pre><code><b>fun</b> <a href="clob_v2.md#0xdee9_clob_v2_create_pool_with_return_">create_pool_with_return_</a>&lt;BaseAsset, QuoteAsset&gt;(taker_fee_rate: u64, maker_rebate_rate: u64, tick_size: u64, min_size: u64, creation_fee: <a href="../sui-framework/balance.md#0x2_balance_Balance">balance::Balance</a>&lt;<a href="../sui-framework/sui.md#0x2_sui_SUI">sui::SUI</a>&gt;, ctx: &<b>mut</b> <a href="../sui-framework/tx_context.md#0x2_tx_context_TxContext">tx_context::TxContext</a>): (<a href="clob_v2.md#0xdee9_clob_v2_Pool">clob_v2::Pool</a>&lt;BaseAsset, QuoteAsset&gt;, <a href="clob_v2.md#0xdee9_clob_v2_PoolOwnerCap">clob_v2::PoolOwnerCap</a>)
 </code></pre>
 
 
@@ -1560,7 +1569,7 @@ Helper function that all the create pools now call to create pools.
     taker_fee_rate: u64,
     maker_rebate_rate: u64,
     tick_size: u64,
-    lot_size: u64,
+    min_size: u64,
     creation_fee: Balance&lt;SUI&gt;,
     ctx: &<b>mut</b> TxContext,
 ): (<a href="clob_v2.md#0xdee9_clob_v2_Pool">Pool</a>&lt;BaseAsset, QuoteAsset&gt;, <a href="clob_v2.md#0xdee9_clob_v2_PoolOwnerCap">PoolOwnerCap</a>) {
@@ -1569,7 +1578,7 @@ Helper function that all the create pools now call to create pools.
     <b>let</b> base_type_name = <a href="../move-stdlib/type_name.md#0x1_type_name_get">type_name::get</a>&lt;BaseAsset&gt;();
     <b>let</b> quote_type_name = <a href="../move-stdlib/type_name.md#0x1_type_name_get">type_name::get</a>&lt;QuoteAsset&gt;();
 
-    <b>assert</b>!(clob_math::unsafe_mul(lot_size, tick_size) &gt; 0, <a href="clob_v2.md#0xdee9_clob_v2_EInvalidTickSizeLotSize">EInvalidTickSizeLotSize</a>);
+    <b>assert</b>!(clob_math::unsafe_mul(min_size, tick_size) &gt; 0, <a href="clob_v2.md#0xdee9_clob_v2_EInvalidTickSizeMinSize">EInvalidTickSizeMinSize</a>);
     <b>assert</b>!(base_type_name != quote_type_name, <a href="clob_v2.md#0xdee9_clob_v2_EInvalidPair">EInvalidPair</a>);
     <b>assert</b>!(taker_fee_rate &gt;= maker_rebate_rate, <a href="clob_v2.md#0xdee9_clob_v2_EInvalidFeeRateRebateRate">EInvalidFeeRateRebateRate</a>);
 
@@ -1588,7 +1597,7 @@ Helper function that all the create pools now call to create pools.
         taker_fee_rate,
         maker_rebate_rate,
         tick_size,
-        lot_size,
+        lot_size: min_size,
     });
     (<a href="clob_v2.md#0xdee9_clob_v2_Pool">Pool</a>&lt;BaseAsset, QuoteAsset&gt; {
         id: pool_uid,
@@ -1600,7 +1609,7 @@ Helper function that all the create pools now call to create pools.
         taker_fee_rate,
         maker_rebate_rate,
         tick_size,
-        lot_size,
+        lot_size: min_size,
         base_custodian: <a href="custodian.md#0xdee9_custodian_new">custodian::new</a>&lt;BaseAsset&gt;(ctx),
         quote_custodian: <a href="custodian.md#0xdee9_custodian_new">custodian::new</a>&lt;QuoteAsset&gt;(ctx),
         creation_fee,
@@ -1621,7 +1630,7 @@ Helper function that all the create pools now call to create pools.
 Function for creating an external pool. This API can be used to wrap deepbook pools into other objects.
 
 
-<pre><code><b>public</b> <b>fun</b> <a href="clob_v2.md#0xdee9_clob_v2_create_pool_with_return">create_pool_with_return</a>&lt;BaseAsset, QuoteAsset&gt;(tick_size: u64, lot_size: u64, creation_fee: <a href="../sui-framework/coin.md#0x2_coin_Coin">coin::Coin</a>&lt;<a href="../sui-framework/sui.md#0x2_sui_SUI">sui::SUI</a>&gt;, ctx: &<b>mut</b> <a href="../sui-framework/tx_context.md#0x2_tx_context_TxContext">tx_context::TxContext</a>): <a href="clob_v2.md#0xdee9_clob_v2_Pool">clob_v2::Pool</a>&lt;BaseAsset, QuoteAsset&gt;
+<pre><code><b>public</b> <b>fun</b> <a href="clob_v2.md#0xdee9_clob_v2_create_pool_with_return">create_pool_with_return</a>&lt;BaseAsset, QuoteAsset&gt;(tick_size: u64, min_size: u64, creation_fee: <a href="../sui-framework/coin.md#0x2_coin_Coin">coin::Coin</a>&lt;<a href="../sui-framework/sui.md#0x2_sui_SUI">sui::SUI</a>&gt;, ctx: &<b>mut</b> <a href="../sui-framework/tx_context.md#0x2_tx_context_TxContext">tx_context::TxContext</a>): <a href="clob_v2.md#0xdee9_clob_v2_Pool">clob_v2::Pool</a>&lt;BaseAsset, QuoteAsset&gt;
 </code></pre>
 
 
@@ -1632,13 +1641,13 @@ Function for creating an external pool. This API can be used to wrap deepbook po
 
 <pre><code><b>public</b> <b>fun</b> <a href="clob_v2.md#0xdee9_clob_v2_create_pool_with_return">create_pool_with_return</a>&lt;BaseAsset, QuoteAsset&gt;(
     tick_size: u64,
-    lot_size: u64,
+    min_size: u64,
     creation_fee: Coin&lt;SUI&gt;,
     ctx: &<b>mut</b> TxContext,
 ): <a href="clob_v2.md#0xdee9_clob_v2_Pool">Pool</a>&lt;BaseAsset, QuoteAsset&gt; {
     <a href="clob_v2.md#0xdee9_clob_v2_create_customized_pool_with_return">create_customized_pool_with_return</a>&lt;BaseAsset, QuoteAsset&gt;(
         tick_size,
-        lot_size,
+        min_size,
         <a href="clob_v2.md#0xdee9_clob_v2_REFERENCE_TAKER_FEE_RATE">REFERENCE_TAKER_FEE_RATE</a>,
         <a href="clob_v2.md#0xdee9_clob_v2_REFERENCE_MAKER_REBATE_RATE">REFERENCE_MAKER_REBATE_RATE</a>,
         creation_fee,
@@ -1660,7 +1669,7 @@ The taker_fee_rate should be greater than or equal to the maker_rebate_rate, and
 Taker_fee_rate of 0.25% should be 2_500_000 for example
 
 
-<pre><code><b>public</b> <b>fun</b> <a href="clob_v2.md#0xdee9_clob_v2_create_customized_pool_with_return">create_customized_pool_with_return</a>&lt;BaseAsset, QuoteAsset&gt;(tick_size: u64, lot_size: u64, taker_fee_rate: u64, maker_rebate_rate: u64, creation_fee: <a href="../sui-framework/coin.md#0x2_coin_Coin">coin::Coin</a>&lt;<a href="../sui-framework/sui.md#0x2_sui_SUI">sui::SUI</a>&gt;, ctx: &<b>mut</b> <a href="../sui-framework/tx_context.md#0x2_tx_context_TxContext">tx_context::TxContext</a>): <a href="clob_v2.md#0xdee9_clob_v2_Pool">clob_v2::Pool</a>&lt;BaseAsset, QuoteAsset&gt;
+<pre><code><b>public</b> <b>fun</b> <a href="clob_v2.md#0xdee9_clob_v2_create_customized_pool_with_return">create_customized_pool_with_return</a>&lt;BaseAsset, QuoteAsset&gt;(tick_size: u64, min_size: u64, taker_fee_rate: u64, maker_rebate_rate: u64, creation_fee: <a href="../sui-framework/coin.md#0x2_coin_Coin">coin::Coin</a>&lt;<a href="../sui-framework/sui.md#0x2_sui_SUI">sui::SUI</a>&gt;, ctx: &<b>mut</b> <a href="../sui-framework/tx_context.md#0x2_tx_context_TxContext">tx_context::TxContext</a>): <a href="clob_v2.md#0xdee9_clob_v2_Pool">clob_v2::Pool</a>&lt;BaseAsset, QuoteAsset&gt;
 </code></pre>
 
 
@@ -1671,7 +1680,7 @@ Taker_fee_rate of 0.25% should be 2_500_000 for example
 
 <pre><code><b>public</b> <b>fun</b> <a href="clob_v2.md#0xdee9_clob_v2_create_customized_pool_with_return">create_customized_pool_with_return</a>&lt;BaseAsset, QuoteAsset&gt;(
     tick_size: u64,
-    lot_size: u64,
+    min_size: u64,
     taker_fee_rate: u64,
     maker_rebate_rate: u64,
     creation_fee: Coin&lt;SUI&gt;,
@@ -1681,7 +1690,7 @@ Taker_fee_rate of 0.25% should be 2_500_000 for example
         taker_fee_rate,
         maker_rebate_rate,
         tick_size,
-        lot_size,
+        min_size,
         <a href="../sui-framework/coin.md#0x2_coin_into_balance">coin::into_balance</a>(creation_fee),
         ctx
     );
@@ -1703,7 +1712,7 @@ If a user wants to create a pool and then destroy/lock the pool_owner_cap one ca
 so with this function.
 
 
-<pre><code><b>public</b> <b>fun</b> <a href="clob_v2.md#0xdee9_clob_v2_create_customized_pool_v2">create_customized_pool_v2</a>&lt;BaseAsset, QuoteAsset&gt;(tick_size: u64, lot_size: u64, taker_fee_rate: u64, maker_rebate_rate: u64, creation_fee: <a href="../sui-framework/coin.md#0x2_coin_Coin">coin::Coin</a>&lt;<a href="../sui-framework/sui.md#0x2_sui_SUI">sui::SUI</a>&gt;, ctx: &<b>mut</b> <a href="../sui-framework/tx_context.md#0x2_tx_context_TxContext">tx_context::TxContext</a>): (<a href="clob_v2.md#0xdee9_clob_v2_Pool">clob_v2::Pool</a>&lt;BaseAsset, QuoteAsset&gt;, <a href="clob_v2.md#0xdee9_clob_v2_PoolOwnerCap">clob_v2::PoolOwnerCap</a>)
+<pre><code><b>public</b> <b>fun</b> <a href="clob_v2.md#0xdee9_clob_v2_create_customized_pool_v2">create_customized_pool_v2</a>&lt;BaseAsset, QuoteAsset&gt;(tick_size: u64, min_size: u64, taker_fee_rate: u64, maker_rebate_rate: u64, creation_fee: <a href="../sui-framework/coin.md#0x2_coin_Coin">coin::Coin</a>&lt;<a href="../sui-framework/sui.md#0x2_sui_SUI">sui::SUI</a>&gt;, ctx: &<b>mut</b> <a href="../sui-framework/tx_context.md#0x2_tx_context_TxContext">tx_context::TxContext</a>): (<a href="clob_v2.md#0xdee9_clob_v2_Pool">clob_v2::Pool</a>&lt;BaseAsset, QuoteAsset&gt;, <a href="clob_v2.md#0xdee9_clob_v2_PoolOwnerCap">clob_v2::PoolOwnerCap</a>)
 </code></pre>
 
 
@@ -1714,7 +1723,7 @@ so with this function.
 
 <pre><code><b>public</b> <b>fun</b> <a href="clob_v2.md#0xdee9_clob_v2_create_customized_pool_v2">create_customized_pool_v2</a>&lt;BaseAsset, QuoteAsset&gt;(
     tick_size: u64,
-    lot_size: u64,
+    min_size: u64,
     taker_fee_rate: u64,
     maker_rebate_rate: u64,
     creation_fee: Coin&lt;SUI&gt;,
@@ -1724,7 +1733,7 @@ so with this function.
         taker_fee_rate,
         maker_rebate_rate,
         tick_size,
-        lot_size,
+        min_size,
         <a href="../sui-framework/coin.md#0x2_coin_into_balance">coin::into_balance</a>(creation_fee),
         ctx
     )
@@ -2169,8 +2178,8 @@ so with this function.
                         filled_quote_quantity_without_commission,
                         maker_order.price
                     );
-                    <b>let</b> filled_base_lot = filled_base_quantity / pool.lot_size;
-                    filled_base_quantity = filled_base_lot * pool.lot_size;
+                    <b>let</b> filled_base_lot = filled_base_quantity / <a href="clob_v2.md#0xdee9_clob_v2_LOT_SIZE">LOT_SIZE</a>;
+                    filled_base_quantity = filled_base_lot * <a href="clob_v2.md#0xdee9_clob_v2_LOT_SIZE">LOT_SIZE</a>;
                     // filled_quote_quantity_without_commission = 0 is permitted here since filled_base_quantity could be 0
                     filled_quote_quantity_without_commission = clob_math::unsafe_mul(
                         filled_base_quantity,
@@ -2793,7 +2802,8 @@ Place a market order to the order book.
     // We start <b>with</b> the bid PriceLevel <b>with</b> the highest price by calling max_leaf on the bids Critbit Tree.
     // The inner <b>loop</b> for iterating over the open orders in ascending orders of order id is the same <b>as</b> above.
     // Then iterate over the price levels in descending order until the market order is completely filled.
-    <b>assert</b>!(quantity % pool.lot_size == 0, <a href="clob_v2.md#0xdee9_clob_v2_EInvalidQuantity">EInvalidQuantity</a>);
+    <b>let</b> min_size = pool.lot_size;
+    <b>assert</b>!(quantity &gt;= min_size && quantity % <a href="clob_v2.md#0xdee9_clob_v2_LOT_SIZE">LOT_SIZE</a> == 0, <a href="clob_v2.md#0xdee9_clob_v2_EInvalidQuantity">EInvalidQuantity</a>);
     <b>assert</b>!(quantity != 0, <a href="clob_v2.md#0xdee9_clob_v2_EInvalidQuantity">EInvalidQuantity</a>);
     <b>let</b> metadata;
     <b>if</b> (is_bid) {
@@ -3084,7 +3094,8 @@ So please check that boolean value first before using the order id.
     <b>assert</b>!(quantity &gt; 0, <a href="clob_v2.md#0xdee9_clob_v2_EInvalidQuantity">EInvalidQuantity</a>);
     <b>assert</b>!(price &gt; 0, <a href="clob_v2.md#0xdee9_clob_v2_EInvalidPrice">EInvalidPrice</a>);
     <b>assert</b>!(price % pool.tick_size == 0, <a href="clob_v2.md#0xdee9_clob_v2_EInvalidPrice">EInvalidPrice</a>);
-    <b>assert</b>!(quantity % pool.lot_size == 0, <a href="clob_v2.md#0xdee9_clob_v2_EInvalidQuantity">EInvalidQuantity</a>);
+    <b>let</b> min_size = pool.lot_size;
+    <b>assert</b>!(quantity &gt;= min_size && quantity % <a href="clob_v2.md#0xdee9_clob_v2_LOT_SIZE">LOT_SIZE</a> == 0, <a href="clob_v2.md#0xdee9_clob_v2_EInvalidQuantity">EInvalidQuantity</a>);
     <b>assert</b>!(expire_timestamp &gt; <a href="../sui-framework/clock.md#0x2_clock_timestamp_ms">clock::timestamp_ms</a>(<a href="../sui-framework/clock.md#0x2_clock">clock</a>), <a href="clob_v2.md#0xdee9_clob_v2_EInvalidExpireTimestamp">EInvalidExpireTimestamp</a>);
     <b>let</b> owner = account_owner(account_cap);
     <b>let</b> original_quantity = quantity;
@@ -3829,19 +3840,8 @@ The latter is the corresponding depth list
 
     <b>if</b> (price_low &lt; price_low_) price_low = price_low_;
     <b>if</b> (price_high &gt; price_high_) price_high = price_high_;
-    <b>let</b> closest_low = <a href="critbit.md#0xdee9_critbit_find_closest_key">critbit::find_closest_key</a>(&pool.bids, price_low);
-    <b>let</b> closest_high = <a href="critbit.md#0xdee9_critbit_find_closest_key">critbit::find_closest_key</a>(&pool.bids, price_high);
-    <b>if</b> (price_low &lt;= closest_low){
-        price_low = closest_low;
-    } <b>else</b> {
-        (price_low, _) = <a href="critbit.md#0xdee9_critbit_next_leaf">critbit::next_leaf</a>(&pool.bids, closest_low);
-    };
-    <b>if</b> (price_high &gt;= closest_high){
-        price_high = closest_high;
-    } <b>else</b> {
-        (price_high, _) = <a href="critbit.md#0xdee9_critbit_previous_leaf">critbit::previous_leaf</a>(&pool.bids, closest_high);
-    };
-
+    price_low = <a href="critbit.md#0xdee9_critbit_find_closest_key">critbit::find_closest_key</a>(&pool.bids, price_low);
+    price_high = <a href="critbit.md#0xdee9_critbit_find_closest_key">critbit::find_closest_key</a>(&pool.bids, price_high);
     <b>while</b> (price_low &lt;= price_high) {
         <b>let</b> depth = <a href="clob_v2.md#0xdee9_clob_v2_get_level2_book_status">get_level2_book_status</a>(
             &pool.bids,
@@ -3893,7 +3893,6 @@ The latter is the corresponding depth list
     <b>let</b> <b>mut</b> depth_vec = <a href="../move-stdlib/vector.md#0x1_vector_empty">vector::empty</a>&lt;u64&gt;();
     <b>if</b> (<a href="critbit.md#0xdee9_critbit_is_empty">critbit::is_empty</a>(&pool.asks)) { <b>return</b> (price_vec, depth_vec) };
     <b>let</b> (price_low_, _) = <a href="critbit.md#0xdee9_critbit_min_leaf">critbit::min_leaf</a>(&pool.asks);
-    <b>let</b> (price_high_, _) = <a href="critbit.md#0xdee9_critbit_max_leaf">critbit::max_leaf</a>(&pool.asks);
 
     // Price_high is less than the lowest leaf in the tree then we <b>return</b> an empty array
     <b>if</b> (price_high &lt; price_low_) {
@@ -3901,20 +3900,10 @@ The latter is the corresponding depth list
     };
 
     <b>if</b> (price_low &lt; price_low_) price_low = price_low_;
+    <b>let</b> (price_high_, _) = <a href="critbit.md#0xdee9_critbit_max_leaf">critbit::max_leaf</a>(&pool.asks);
     <b>if</b> (price_high &gt; price_high_) price_high = price_high_;
-    <b>let</b> closest_low = <a href="critbit.md#0xdee9_critbit_find_closest_key">critbit::find_closest_key</a>(&pool.asks, price_low);
-    <b>let</b> closest_high = <a href="critbit.md#0xdee9_critbit_find_closest_key">critbit::find_closest_key</a>(&pool.asks, price_high);
-    <b>if</b> (price_low &lt;= closest_low){
-        price_low = closest_low;
-    } <b>else</b> {
-        (price_low, _) = <a href="critbit.md#0xdee9_critbit_next_leaf">critbit::next_leaf</a>(&pool.bids, closest_low);
-    };
-    <b>if</b> (price_high &gt;= closest_high){
-        price_high = closest_high;
-    } <b>else</b> {
-        (price_high, _) = <a href="critbit.md#0xdee9_critbit_previous_leaf">critbit::previous_leaf</a>(&pool.bids, closest_high);
-    };
-
+    price_low = <a href="critbit.md#0xdee9_critbit_find_closest_key">critbit::find_closest_key</a>(&pool.asks, price_low);
+    price_high = <a href="critbit.md#0xdee9_critbit_find_closest_key">critbit::find_closest_key</a>(&pool.asks, price_high);
     <b>while</b> (price_low &lt;= price_high) {
         <b>let</b> depth = <a href="clob_v2.md#0xdee9_clob_v2_get_level2_book_status">get_level2_book_status</a>(
             &pool.asks,
